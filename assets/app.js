@@ -102,6 +102,15 @@ function formatDateTime(value) {
   }).format(date);
 }
 
+function compareText(left, right) {
+  return String(left || "").localeCompare(String(right || ""), undefined, { sensitivity: "base" });
+}
+
+function zipSortValue(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  return digits ? Number(digits) : Number.MAX_SAFE_INTEGER;
+}
+
 function cssVar(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
@@ -711,7 +720,7 @@ function renderSummaryLists() {
           <div class="stack-item">
             <div class="stack-copy">
               <p class="stack-title">${escapeHtml(lead.displayName)}</p>
-              <p class="stack-meta">${escapeHtml(lead.status)} · ${escapeHtml(lead.source)}</p>
+              <p class="stack-meta">${escapeHtml(lead.status)} | ${escapeHtml(lead.source)}</p>
             </div>
             <span class="pill pill-warning">${escapeHtml(formatDate(lead.leadDate))}</span>
           </div>
@@ -748,8 +757,47 @@ function populateFilterOptions() {
     .join("");
 }
 
+function renderSourceSegments() {
+  const root = document.getElementById("sourceSegmentButtons");
+  const sourceFilter = document.getElementById("sourceFilter");
+  if (!root || !sourceFilter || !state.metrics) return;
+
+  const selected = sourceFilter.value || "all";
+  const entries = Object.entries(state.metrics.sourceCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10);
+
+  const pills = [
+    { label: "All sources", value: "all", count: state.leads.length },
+    ...entries.map(([label, count]) => ({ label, value: label, count })),
+  ];
+
+  root.innerHTML = pills
+    .map(
+      (pill) => `
+        <button
+          type="button"
+          class="segment-pill ${selected === pill.value ? "active" : ""}"
+          data-source-segment="${escapeHtml(pill.value)}"
+        >
+          <span>${escapeHtml(pill.label)}</span>
+          <span class="segment-pill-count">${escapeHtml(formatNumber(pill.count))}</span>
+        </button>
+      `,
+    )
+    .join("");
+
+  root.querySelectorAll("[data-source-segment]").forEach((button) => {
+    button.addEventListener("click", () => {
+      sourceFilter.value = button.getAttribute("data-source-segment") || "all";
+      applyFilters();
+    });
+  });
+}
+
 function applyFilters() {
   const search = normalize(document.getElementById("searchInput")?.value || "");
+  const zipFilter = normalize(document.getElementById("zipFilter")?.value || "");
   const source = document.getElementById("sourceFilter")?.value || "all";
   const status = document.getElementById("statusFilter")?.value || "all";
   const newCaller = document.getElementById("newCallerFilter")?.value || "all";
@@ -758,26 +806,31 @@ function applyFilters() {
   let results = state.leads.filter((lead) => {
     const matchesSearch =
       !search ||
-      normalize(
-        `${lead.displayName} ${lead.source} ${lead.status} ${lead.contactNumber} ${lead.postalCode} ${lead.landingPage}`,
-      ).includes(search);
+      normalize(`${lead.displayName} ${lead.clientName} ${lead.mondayItemName}`).includes(search);
+    const matchesZip = !zipFilter || normalize(lead.postalCode).includes(zipFilter);
 
     const matchesSource = source === "all" || lead.source === source;
     const matchesStatus = status === "all" || lead.status === status;
     const matchesCaller = newCaller === "all" || lead.newCaller === newCaller;
 
-    return matchesSearch && matchesSource && matchesStatus && matchesCaller;
+    return matchesSearch && matchesZip && matchesSource && matchesStatus && matchesCaller;
   });
 
   results.sort((left, right) => {
     if (sort === "date-asc") return left.leadDate - right.leadDate;
-    if (sort === "client-asc") return left.displayName.localeCompare(right.displayName);
-    if (sort === "source-asc") return left.source.localeCompare(right.source);
-    if (sort === "status-asc") return left.status.localeCompare(right.status);
+    if (sort === "client-asc") return compareText(left.displayName, right.displayName);
+    if (sort === "client-desc") return compareText(right.displayName, left.displayName);
+    if (sort === "source-asc") return compareText(left.source, right.source);
+    if (sort === "landing-asc") return compareText(left.landingPage || "~", right.landingPage || "~");
+    if (sort === "landing-desc") return compareText(right.landingPage || "", left.landingPage || "");
+    if (sort === "zip-asc") return zipSortValue(left.postalCode) - zipSortValue(right.postalCode);
+    if (sort === "zip-desc") return zipSortValue(right.postalCode) - zipSortValue(left.postalCode);
+    if (sort === "status-asc") return compareText(left.status, right.status);
     return right.leadDate - left.leadDate;
   });
 
   state.filteredLeads = results;
+  renderSourceSegments();
   renderTable();
 }
 
@@ -857,7 +910,7 @@ function renderColumnMap() {
       (column) => `
         <div class="column-pill">
           <p class="column-title">${escapeHtml(column.title)}</p>
-          <p class="column-type">${escapeHtml(column.id)} · ${escapeHtml(column.type)}</p>
+          <p class="column-type">${escapeHtml(column.id)} | ${escapeHtml(column.type)}</p>
         </div>
       `,
     )
@@ -959,6 +1012,7 @@ function bindEvents() {
 
   document.getElementById("exportBtn")?.addEventListener("click", downloadCsv);
   document.getElementById("searchInput")?.addEventListener("input", applyFilters);
+  document.getElementById("zipFilter")?.addEventListener("input", applyFilters);
   document.getElementById("sourceFilter")?.addEventListener("change", applyFilters);
   document.getElementById("statusFilter")?.addEventListener("change", applyFilters);
   document.getElementById("newCallerFilter")?.addEventListener("change", applyFilters);
@@ -966,6 +1020,7 @@ function bindEvents() {
 
   document.getElementById("resetFiltersBtn")?.addEventListener("click", () => {
     document.getElementById("searchInput").value = "";
+    document.getElementById("zipFilter").value = "";
     document.getElementById("sourceFilter").value = "all";
     document.getElementById("statusFilter").value = "all";
     document.getElementById("newCallerFilter").value = "all";
@@ -1015,7 +1070,11 @@ function bindEvents() {
   });
 
   document.querySelectorAll(".nav-link").forEach((link) => {
-    link.addEventListener("click", () => {
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      const targetId = link.getAttribute("href")?.replace("#", "");
+      const target = targetId ? document.getElementById(targetId) : null;
+      target?.scrollIntoView({ behavior: "smooth", block: "start" });
       sidebar?.classList.remove("mobile-open");
       overlay?.classList.remove("active");
     });
@@ -1050,3 +1109,4 @@ function init() {
 }
 
 init();
+

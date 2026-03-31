@@ -227,13 +227,26 @@
             <p class="panel-copy" id="resultsSummary">0 leads shown</p>
           </div>
 
+          <div class="segment-toolbar">
+            <div>
+              <p class="eyebrow">Source segments</p>
+              <p class="panel-copy">Click a campaign segment to focus the table instantly.</p>
+            </div>
+            <div class="segment-pills" id="sourceSegmentButtons"></div>
+          </div>
+
           <div class="filters">
             <label class="field field-search">
-              <span>Search</span>
+              <span>Client name</span>
               <div class="input-with-icon">
                 <i data-lucide="search"></i>
-                <input id="searchInput" type="search" placeholder="Client, source, phone, zip, landing page" />
+                <input id="searchInput" type="search" placeholder="Search client name" />
               </div>
+            </label>
+
+            <label class="field">
+              <span>Zip code</span>
+              <input id="zipFilter" type="search" placeholder="Filter by zip/postal code" />
             </label>
 
             <label class="field">
@@ -266,7 +279,12 @@
                 <option value="date-desc">Date of Lead (Newest)</option>
                 <option value="date-asc">Date of Lead (Oldest)</option>
                 <option value="client-asc">Client Name (A-Z)</option>
+                <option value="client-desc">Client Name (Z-A)</option>
                 <option value="source-asc">Source (A-Z)</option>
+                <option value="landing-asc">Landing Page URL (A-Z)</option>
+                <option value="landing-desc">Landing Page URL (Z-A)</option>
+                <option value="zip-asc">Zip Code (Low-High)</option>
+                <option value="zip-desc">Zip Code (High-Low)</option>
                 <option value="status-asc">Status (A-Z)</option>
               </select>
             </label>
@@ -358,3 +376,4 @@
   <script src="assets/app.js"></script>
 </body>
 </html>
+
