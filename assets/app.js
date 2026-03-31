@@ -160,10 +160,23 @@ function getSparkData(trend = 'up') {
   });
 }
 
+function setCanvasFixedSize(canvas, desktopWidth, desktopHeight, mobileWidth, mobileHeight) {
+  if (!canvas) return;
+  const isMobile = window.innerWidth <= 768;
+  const width = isMobile ? mobileWidth : desktopWidth;
+  const height = isMobile ? mobileHeight : desktopHeight;
+  canvas.style.width = `${width}px`;
+  canvas.style.height = `${height}px`;
+  const pixelRatio = window.devicePixelRatio || 1;
+  canvas.width = Math.floor(width * pixelRatio);
+  canvas.height = Math.floor(height * pixelRatio);
+}
+
 const sparkInstances = {};
 function makeSparkline(id, trend, color) {
   const canvas = document.getElementById(id);
   if(!canvas) return;
+  setCanvasFixedSize(canvas, 180, 40, 120, 36);
   if(sparkInstances[id]) { sparkInstances[id].destroy(); delete sparkInstances[id]; }
   sparkInstances[id] = new Chart(canvas, {
     type: 'line',
@@ -173,7 +186,7 @@ function makeSparkline(id, trend, color) {
         fill: true, backgroundColor: color + '22', pointRadius: 0, tension: 0.4 }]
     },
     options: {
-      responsive: true, maintainAspectRatio: false,
+      responsive: false, maintainAspectRatio: false,
       animation: { duration: 800 },
       plugins: { legend: { display: false }, tooltip: { enabled: false } },
       scales: { x: { display: false }, y: { display: false } }
@@ -186,6 +199,7 @@ let trafficChart;
 function buildTrafficChart() {
   const ctx = document.getElementById('trafficChart');
   if(!ctx) return;
+  setCanvasFixedSize(ctx, 960, 240, 360, 200);
   const labels   = Array.from({length: 31}, (_, i) => `Mar ${i+1}`);
   const sessions = Array.from({length: 31}, () => Math.round(2200 + Math.random() * 800));
   const organic  = Array.from({length: 31}, () => Math.round(900  + Math.random() * 400));
@@ -199,7 +213,7 @@ function buildTrafficChart() {
       { label:'Paid',     data:paid,     borderColor:orangeColor(), backgroundColor:'transparent', borderWidth:1.5, pointRadius:0, tension:0.4, borderDash:[4,3] }
     ]},
     options: {
-      responsive:true, maintainAspectRatio:false, resizeDelay:100,
+      responsive:false, maintainAspectRatio:false, resizeDelay:100,
       interaction:{ mode:'index', intersect:false },
       plugins:{ legend:{ display:false }, tooltip: tooltipDefaults() },
       scales:{
@@ -215,6 +229,7 @@ let sourceChart;
 function buildSourceChart() {
   const ctx = document.getElementById('sourceChart');
   if(!ctx) return;
+  setCanvasFixedSize(ctx, 360, 200, 300, 160);
   if(sourceChart) sourceChart.destroy();
   sourceChart = new Chart(ctx, {
     type: 'doughnut',
@@ -225,7 +240,7 @@ function buildSourceChart() {
         borderWidth:0, hoverOffset:6 }]
     },
     options: {
-      responsive:true, maintainAspectRatio:false, resizeDelay:100,
+      responsive:false, maintainAspectRatio:false, resizeDelay:100,
       cutout:'68%',
       plugins:{ legend:{display:false}, tooltip:{ ...tooltipDefaults(), callbacks:{ label:c=>` ${c.label}: ${c.parsed}%` } } }
     }
@@ -238,6 +253,7 @@ function buildSeoCharts() {
   // Line
   const ctx = document.getElementById('seoChart');
   if(ctx) {
+    setCanvasFixedSize(ctx, 960, 240, 360, 200);
     if(seoChart) seoChart.destroy();
     const labels  = Array.from({length:31},(_,i)=>`Mar ${i+1}`);
     const impr    = Array.from({length:31},()=>Math.round(8000+Math.random()*2000));
@@ -248,7 +264,7 @@ function buildSeoCharts() {
         { label:'Impressions', data:impr,   borderColor:blueColor(),    backgroundColor:blueColor()+'18',    fill:true, borderWidth:2, pointRadius:0, tension:0.4 },
         { label:'Clicks',      data:clicks, borderColor:primaryColor(), backgroundColor:primaryColor()+'18', fill:true, borderWidth:2, pointRadius:0, tension:0.4 }
       ]},
-      options:{ responsive:true, maintainAspectRatio:false, resizeDelay:100,
+      options:{ responsive:false, maintainAspectRatio:false, resizeDelay:100,
         interaction:{mode:'index',intersect:false},
         plugins:{legend:{display:false}, tooltip:tooltipDefaults()},
         scales:{
@@ -281,6 +297,7 @@ let trafficBreakdownChart, deviceChart;
 function buildTrafficCharts() {
   const ctx = document.getElementById('trafficBreakdownChart');
   if(ctx) {
+    setCanvasFixedSize(ctx, 960, 240, 360, 200);
     if(trafficBreakdownChart) trafficBreakdownChart.destroy();
     const labels  = Array.from({length:31},(_,i)=>`Mar ${i+1}`);
     const organic = Array.from({length:31},()=>Math.round(900+Math.random()*400));
@@ -295,7 +312,7 @@ function buildTrafficCharts() {
         { label:'Direct',  data:direct,  backgroundColor:blueColor()+'cc', borderRadius:2, borderSkipped:false },
         { label:'Social',  data:social,  backgroundColor:purpleColor()+'cc', borderRadius:2, borderSkipped:false }
       ]},
-      options:{ responsive:true, maintainAspectRatio:false, resizeDelay:100,
+      options:{ responsive:false, maintainAspectRatio:false, resizeDelay:100,
         interaction:{mode:'index',intersect:false},
         plugins:{ legend:{display:false}, tooltip:tooltipDefaults() },
         scales:{
@@ -307,6 +324,7 @@ function buildTrafficCharts() {
   }
   const dCtx = document.getElementById('deviceChart');
   if(dCtx) {
+    setCanvasFixedSize(dCtx, 360, 200, 300, 160);
     if(deviceChart) deviceChart.destroy();
     deviceChart = new Chart(dCtx, {
       type:'doughnut',
@@ -315,7 +333,7 @@ function buildTrafficCharts() {
           backgroundColor:[primaryColor(),blueColor(),orangeColor()],
           borderWidth:0, hoverOffset:6 }]
       },
-      options:{ responsive:true, maintainAspectRatio:false, resizeDelay:100, cutout:'68%',
+      options:{ responsive:false, maintainAspectRatio:false, resizeDelay:100, cutout:'68%',
         plugins:{legend:{display:false}, tooltip:{...tooltipDefaults(), callbacks:{label:c=>` ${c.label}: ${c.parsed}%`}}}
       }
     });
@@ -327,6 +345,7 @@ let convChart, convDonut;
 function buildConvCharts() {
   const ctx = document.getElementById('convChart');
   if(ctx) {
+    setCanvasFixedSize(ctx, 960, 240, 360, 200);
     if(convChart) convChart.destroy();
     const labels = Array.from({length:31},(_,i)=>`Mar ${i+1}`);
     const forms  = Array.from({length:31},()=>Math.round(18+Math.random()*12));
@@ -339,7 +358,7 @@ function buildConvCharts() {
         { label:'Calls',  data:calls, backgroundColor:blueColor()+'cc',    borderRadius:2, borderSkipped:false },
         { label:'Chat',   data:chat,  backgroundColor:purpleColor()+'cc',  borderRadius:2, borderSkipped:false }
       ]},
-      options:{ responsive:true, maintainAspectRatio:false, resizeDelay:100,
+      options:{ responsive:false, maintainAspectRatio:false, resizeDelay:100,
         interaction:{mode:'index',intersect:false},
         plugins:{ legend:{display:false}, tooltip:tooltipDefaults() },
         scales:{
@@ -351,6 +370,7 @@ function buildConvCharts() {
   }
   const dCtx = document.getElementById('convDonut');
   if(dCtx) {
+    setCanvasFixedSize(dCtx, 360, 200, 300, 160);
     if(convDonut) convDonut.destroy();
     convDonut = new Chart(dCtx, {
       type:'doughnut',
@@ -359,7 +379,7 @@ function buildConvCharts() {
           backgroundColor:[primaryColor(),orangeColor(),blueColor(),purpleColor()],
           borderWidth:0, hoverOffset:6 }]
       },
-      options:{ responsive:true, maintainAspectRatio:false, resizeDelay:100, cutout:'68%',
+      options:{ responsive:false, maintainAspectRatio:false, resizeDelay:100, cutout:'68%',
         plugins:{legend:{display:false}, tooltip:{...tooltipDefaults(), callbacks:{label:c=>` ${c.label}: ${c.parsed}%`}}}
       }
     });
