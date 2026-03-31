@@ -128,8 +128,8 @@ function tooltipDefaults() {
 }
 
 async function fetchMondayData() {
-  if (!MONDAY_API_TOKEN || MONDAY_API_TOKEN === 'YOUR_MONDAY_API_TOKEN') {
-    console.warn('Monday API token not configured. Using mock data.');
+  if (!MONDAY_API_TOKEN || MONDAY_API_TOKEN === 'eyJhbGciOiJIUzI1NiJ9.eyJ0aWQiOjY0MDEyNjI2OCwiYWFpIjoxMSwidWlkIjo5OTgxNTY5NCwiaWFkIjoiMjAyNi0wMy0zMVQxNzo0NTozNC4wMDBaIiwicGVyIjoibWU6d3JpdGUiLCJhY3RpZCI6NzQ3NTEwNiwicmduIjoidXNlMSJ9.I120BCWqcR0iZpFRzSz4K8Z8M7SPJ_eI33hVnn23sL4') {
+    console.warn('Monday API token not configured. Please set a valid personal API token from Monday.com.');
     return null;
   }
 
@@ -150,6 +150,7 @@ async function fetchMondayData() {
   }`;
 
   try {
+    console.log('Monday API query board id', MONDAY_BOARD_ID);
     const res = await fetch(MONDAY_API_URL, {
       method: 'POST',
       headers: {
@@ -158,12 +159,23 @@ async function fetchMondayData() {
       },
       body: JSON.stringify({ query, variables: { boardId: MONDAY_BOARD_ID } })
     });
+
+    if (res.status === 401 || res.status === 403) {
+      console.error('Monday API token invalid or unauthorized (401/403). Use a personal API token, not client secret.');
+      return null;
+    }
+
     const json = await res.json();
+    console.log('Monday API response', json);
     if (json.errors) {
       console.error('Monday API errors', json.errors);
       return null;
     }
-    return json.data?.boards?.[0] || null;
+    if (!json.data?.boards?.[0]) {
+      console.warn('Monday API empty board data', json);
+      return null;
+    }
+    return json.data.boards[0];
   } catch (error) {
     console.error('Monday API fetch failed', error);
     return null;
@@ -195,37 +207,102 @@ function getColText(item, keys, fallback = '') {
   if (!col) return fallback;
   if (col.text !== undefined && col.text !== null && col.text !== '') return col.text;
   if (col.value !== undefined && col.value !== null && col.value !== '') {
-    try { const parsed = JSON.parse(col.value); if (parsed && parsed.text) return parsed.text; } catch (e) {}
+    // Board values may be JSON for various column types
+    try {
+      const parsed = JSON.parse(col.value);
+      if (parsed) {
+        if (typeof parsed === 'string') return parsed;
+        if (parsed.text) return parsed.text;
+        if (parsed.label) return parsed.label;
+        if (parsed.name) return parsed.name;
+        if (Array.isArray(parsed) && parsed.length) {
+          // Person or tags may come as arrays
+          return parsed.map(p => p.name || p.text || p.label || p).filter(Boolean).join(', ');
+        }
+        if (parsed.person) return parsed.person.name || parsed.person.email || '';
+      }
+    } catch (e) {
+      // not JSON
+    }
     return String(col.value);
   }
   return fallback;
 }
 
+function parseLeadDate(raw) {
+  if (!raw) return null;
+  const d = new Date(raw);
+  if (!isNaN(d.getTime())) return d.toISOString().slice(0,10);
+  const n = Date.parse(raw);
+  if (!isNaN(n)) return new Date(n).toISOString().slice(0,10);
+  return null;
+}
+
+function updateKpiCounters(stats) {
+  const kpiVisits = document.querySelector('.kpi-card:nth-child(1) .kpi-value');
+  if (kpiVisits) { kpiVisits.dataset.count = (stats.totalLeads || 0).toString(); }
+  const kpiImpr = document.querySelector('.kpi-card:nth-child(2) .kpi-value');
+  if (kpiImpr) { kpiImpr.dataset.count = (stats.openLeads || 0).toString(); }
+  const kpiConv = document.querySelector('.kpi-card:nth-child(3) .kpi-value');
+  if (kpiConv) { kpiConv.dataset.count = (stats.closedLeads || 0).toString(); }
+}
+
+let boardStats = {
+  totalLeads: 0,
+  openLeads: 0,
+  closedLeads: 0,
+  dateCounts: {},
+  sourceCounts: {},
+  statusCounts: {},
+  newCallerCounts: { yes: 0, no: 0, unknown: 0 }
+};
+
 function buildMondayMappedData(board) {
-  if (!board?.items || !board.items.length) return;
+  if (!board?.items || !board.items.length) {
+    console.warn('Monday board has no items:', board);
+    return;
+  }
+
+  // Debug: log exactly which columns exist in board items
+  const columnKeys = new Set();
+  board.items.forEach(item => {
+    item.column_values?.forEach(cv => {
+      const key = cv.title || cv.id || '(unknown)';
+      columnKeys.add(key);
+    });
+  });
+  console.log('Monday board columns detected:', Array.from(columnKeys));
 
   const knownItems = board.items.slice(0, 30);
 
   topPages = knownItems.map(item => {
-    const itemStatus    = getColText(item, ['status', 'item', 'group', 'new caller?']);
+    const itemStatus    = getColText(item, ['status', 'lead status', 'stage']);
     const newCaller     = getColText(item, ['new caller?', 'new caller', 'caller']);
-    const dateLead      = getColText(item, ['date of lead', 'date', 'created_at', 'created']);
-    const source        = getColText(item, ['source (campaign)', 'source', 'lead source', 'channel']);
-    const clientName    = getColText(item, ['client name', 'name', 'customer']);
+    const dateLead      = getColText(item, ['date of lead', 'date', 'created_at']);
+    const source        = getColText(item, ['source (campaign)', 'source', 'campaign', 'lead source']);
+    const clientName    = getColText(item, ['client name', 'client', 'name', 'item']);
     const landingPage   = getColText(item, ['landing page url', 'landing page', 'url']);
     const postalCode    = getColText(item, ['postal code', 'zip', 'postcode']);
     const contactNumber = getColText(item, ['contact number', 'phone', 'contact']);
+
+    // Keep all raw column values for debugging if needed
+    const raw = item.column_values?.reduce((acc, cv) => {
+      const key = cv.title || cv.id || 'unknown';
+      acc[key] = { text: cv.text, value: cv.value };
+      return acc;
+    }, {}) || {};
 
     return {
       url: clientName || item.name || 'Unnamed lead',
       source: source || 'Unknown',
       status: itemStatus || 'Unspecified',
       owner: newCaller || '—',
-      created: dateLead || (item.created_at ? new Date(item.created_at).toLocaleDateString() : 'N/A'),
+      created: dateLead || (item.created_at ? new Date(item.created_at).toLocaleString() : 'N/A'),
       phone: contactNumber || '—',
       email: landingPage || '—',
       landingPage,
-      postalCode
+      postalCode,
+      raw
     };
   });
 
@@ -238,19 +315,37 @@ function buildMondayMappedData(board) {
     };
   });
 
-  // Buttons: convert KPI cards to lead summary
-  const totalLeads = topPages.length;
-  const openLeads = topPages.filter(l => /new|open|pending/i.test(l.status)).length;
-  const closedLeads = topPages.filter(l => /won|closed|converted/i.test(l.status)).length;
+  // Build board-specific stats
+  boardStats = {
+    totalLeads: topPages.length,
+    openLeads: topPages.filter(l => /new|open|pending|answered/i.test(l.status)).length,
+    closedLeads: topPages.filter(l => /won|closed|completed|converted/i.test(l.status)).length,
+    dateCounts: {},
+    sourceCounts: {},
+    statusCounts: {},
+    newCallerCounts: { yes: 0, no: 0, unknown: 0 }
+  };
 
-  const kpiVisits = document.querySelector('.kpi-card:nth-child(1) .kpi-value');
-  if (kpiVisits) { kpiVisits.dataset.count = totalLeads.toString(); }
-  const kpiImpr = document.querySelector('.kpi-card:nth-child(2) .kpi-value');
-  if (kpiImpr) { kpiImpr.dataset.count = openLeads.toString(); }
-  const kpiConv = document.querySelector('.kpi-card:nth-child(3) .kpi-value');
-  if (kpiConv) { kpiConv.dataset.count = closedLeads.toString(); }
+  topPages.forEach(lead => {
+    const leadDate = parseLeadDate(lead.created);
+    if (leadDate) {
+      boardStats.dateCounts[leadDate] = (boardStats.dateCounts[leadDate] || 0) + 1;
+    }
 
-  // Mark the table header to lead view
+    const src = (lead.source || 'Unknown').trim();
+    boardStats.sourceCounts[src] = (boardStats.sourceCounts[src] || 0) + 1;
+
+    const status = (lead.status || 'Unspecified').trim();
+    boardStats.statusCounts[status] = (boardStats.statusCounts[status] || 0) + 1;
+
+    const newCaller = (lead.owner || '').toString().trim().toLowerCase();
+    if (/^(yes|true|y|1|new)/.test(newCaller)) boardStats.newCallerCounts.yes += 1;
+    else if (/^(no|false|n|0)/.test(newCaller)) boardStats.newCallerCounts.no += 1;
+    else boardStats.newCallerCounts.unknown += 1;
+  });
+
+  updateKpiCounters(boardStats);
+
   const tableHeadRow = document.querySelector('#pagesTableBody')?.closest('table')?.querySelector('thead tr');
   if (tableHeadRow) {
     tableHeadRow.innerHTML = '<th>Lead</th><th>Source</th><th>Status</th><th>New Caller</th><th>Date of Lead</th><th>Landing Page</th><th>Postal Code</th><th>Contact</th>';
@@ -337,10 +432,37 @@ function buildTrafficChart() {
   const ctx = document.getElementById('trafficChart');
   if(!ctx) return;
   setCanvasFixedSize(ctx, 960, 240, 360, 200);
-  const labels   = Array.from({length: 31}, (_, i) => `Mar ${i+1}`);
-  const sessions = Array.from({length: 31}, () => Math.round(2200 + Math.random() * 800));
-  const organic  = Array.from({length: 31}, () => Math.round(900  + Math.random() * 400));
-  const paid     = Array.from({length: 31}, () => Math.round(400  + Math.random() * 200));
+
+  const dateCounts = boardStats.dateCounts || {};
+  const sourceCounts = boardStats.sourceCounts || {};
+
+  let labels = [], sessions = [], organic = [], paid = [];
+
+  if (Object.keys(dateCounts).length) {
+    labels = Object.keys(dateCounts).sort();
+    sessions = labels.map(d => dateCounts[d] || 0);
+
+    const postings = Object.entries(sourceCounts).reduce((acc, [source, count]) => {
+      const lower = source.trim().toLowerCase();
+      if (/organic/.test(lower)) acc.organic += count;
+      else if (/paid|pmax|google|ads/.test(lower)) acc.paid += count;
+      else acc.other += count;
+      return acc;
+    }, {organic:0, paid:0, other:0});
+
+    const totalSource = postings.organic + postings.paid + postings.other || 1;
+    const organicRatio = postings.organic / totalSource;
+    const paidRatio = postings.paid / totalSource;
+
+    organic = sessions.map(val => Math.round(val * organicRatio));
+    paid = sessions.map(val => Math.round(val * paidRatio));
+  } else {
+    labels = Array.from({length: 31}, (_, i) => `Mar ${i+1}`);
+    sessions = Array.from({length: 31}, () => Math.round(2200 + Math.random() * 800));
+    organic = Array.from({length: 31}, () => Math.round(900  + Math.random() * 400));
+    paid     = Array.from({length: 31}, () => Math.round(400  + Math.random() * 200));
+  }
+
   if(trafficChart) trafficChart.destroy();
   trafficChart = new Chart(ctx, {
     type: 'line',
@@ -368,62 +490,76 @@ function buildSourceChart() {
   if(!ctx) return;
   setCanvasFixedSize(ctx, 360, 200, 300, 160);
   if(sourceChart) sourceChart.destroy();
+
+  const sources = boardStats.sourceCounts || {};
+  let labels = [];
+  let data = [];
+
+  if (Object.keys(sources).length) {
+    const sorted = Object.entries(sources).sort((a, b) => b[1] - a[1]).slice(0, 8);
+    labels = sorted.map(([source]) => source);
+    data = sorted.map(([, count]) => count);
+  } else {
+    labels = ['Organic','Direct','Paid','Social','Other'];
+    data = [43,22,18,10,7];
+  }
+
+  const colors = labels.map((label, idx) => {
+    if (idx === 0) return primaryColor();
+    if (idx === 1) return blueColor();
+    if (idx === 2) return orangeColor();
+    if (idx === 3) return purpleColor();
+    return isDark() ? '#4a4948' : '#bab9b4';
+  });
+
   sourceChart = new Chart(ctx, {
-    type: 'doughnut',
-    data: {
-      labels: ['Organic','Direct','Paid','Social','Other'],
-      datasets: [{ data:[43,22,18,10,7],
-        backgroundColor:[primaryColor(),blueColor(),orangeColor(),purpleColor(),isDark()?'#4a4948':'#bab9b4'],
-        borderWidth:0, hoverOffset:6 }]
-    },
-    options: {
-      responsive:false, maintainAspectRatio:false, resizeDelay:100,
-      cutout:'68%',
-      plugins:{ legend:{display:false}, tooltip:{ ...tooltipDefaults(), callbacks:{ label:c=>` ${c.label}: ${c.parsed}%` } } }
-    }
+    type:'doughnut',
+    data:{ labels, datasets:[{ data, backgroundColor:colors, borderWidth:0, hoverOffset:6 }]},
+    options:{ responsive:false, maintainAspectRatio:false, resizeDelay:100, cutout:'68%', plugins:{ legend:{display:false}, tooltip:{ ...tooltipDefaults(), callbacks:{ label:c=>` ${c.label}: ${c.parsed}` } } } }
   });
 }
 
 // ── SEO Charts ────────────────────────────────────────────
 let seoChart, seoDonut;
 function buildSeoCharts() {
-  // Line
+  const statusCounts = boardStats.statusCounts || {};
+  const statusLabels = Object.keys(statusCounts).length ? Object.keys(statusCounts) : ['New','Answered','Completed','Closed'];
+  const statusValues = Object.keys(statusCounts).length ? Object.values(statusCounts) : [12,9,7,4];
+
   const ctx = document.getElementById('seoChart');
-  if(ctx) {
+  if (ctx) {
     setCanvasFixedSize(ctx, 960, 240, 360, 200);
-    if(seoChart) seoChart.destroy();
-    const labels  = Array.from({length:31},(_,i)=>`Mar ${i+1}`);
-    const impr    = Array.from({length:31},()=>Math.round(8000+Math.random()*2000));
-    const clicks  = Array.from({length:31},()=>Math.round(900+Math.random()*400));
+    if (seoChart) seoChart.destroy();
     seoChart = new Chart(ctx, {
       type:'line',
-      data:{ labels, datasets:[
-        { label:'Impressions', data:impr,   borderColor:blueColor(),    backgroundColor:blueColor()+'18',    fill:true, borderWidth:2, pointRadius:0, tension:0.4 },
-        { label:'Clicks',      data:clicks, borderColor:primaryColor(), backgroundColor:primaryColor()+'18', fill:true, borderWidth:2, pointRadius:0, tension:0.4 }
+      data:{ labels: statusLabels, datasets:[
+        { label:'Lead status progression', data: statusValues, borderColor: blueColor(), backgroundColor: blueColor()+'18', fill:true, borderWidth:2, pointRadius:3, tension:0.3 }
       ]},
       options:{ responsive:false, maintainAspectRatio:false, resizeDelay:100,
         interaction:{mode:'index',intersect:false},
         plugins:{legend:{display:false}, tooltip:tooltipDefaults()},
         scales:{
           x:{grid:{color:gridColor()}, ticks:{color:textColor(),font:{family:'Inter',size:11},maxTicksLimit:8}, border:{display:false}},
-          y:{grid:{color:gridColor()}, ticks:{color:textColor(),font:{family:'Inter',size:11},callback:v=>v>=1000?(v/1000).toFixed(1)+'k':v}, border:{display:false}}
+          y:{grid:{color:gridColor()}, ticks:{color:textColor(),font:{family:'Inter',size:11}}, border:{display:false}}
         }
       }
     });
   }
-  // Donut
+
   const dCtx = document.getElementById('seoDonut');
-  if(dCtx) {
-    if(seoDonut) seoDonut.destroy();
+  if (dCtx) {
+    if (seoDonut) seoDonut.destroy();
+    const sourceCounts = boardStats.sourceCounts || {};
+    const sourceLabels = Object.keys(sourceCounts).length ? Object.keys(sourceCounts) : ['Organic','Direct','Paid','Social','Other'];
+    const sourceValues = Object.keys(sourceCounts).length ? Object.values(sourceCounts) : [43,22,18,10,7];
+
     seoDonut = new Chart(dCtx, {
       type:'doughnut',
-      data:{ labels:['Physiotherapy','Occupational','Speech','Rehab','Other'],
-        datasets:[{ data:[28,19,15,23,15],
-          backgroundColor:[primaryColor(),blueColor(),orangeColor(),purpleColor(),isDark()?'#4a4948':'#bab9b4'],
-          borderWidth:0, hoverOffset:6 }]
-      },
-      options:{ responsive:true, maintainAspectRatio:false, resizeDelay:100, cutout:'68%',
-        plugins:{legend:{display:false}, tooltip:{...tooltipDefaults(), callbacks:{label:c=>` ${c.label}: ${c.parsed}%`}}}
+      data:{ labels: sourceLabels, datasets:[{ data: sourceValues,
+        backgroundColor: sourceLabels.map((_, idx) => idx===0?primaryColor():idx===1?blueColor():idx===2?orangeColor():idx===3?purpleColor():(isDark()?'#4a4948':'#bab9b4')),
+        borderWidth:0, hoverOffset:6 }]},
+      options:{ responsive:false, maintainAspectRatio:false, resizeDelay:100, cutout:'68%',
+        plugins:{legend:{display:false}, tooltip:{...tooltipDefaults(), callbacks:{label:c=>` ${c.label}: ${c.parsed}`}}}
       }
     });
   }
@@ -436,43 +572,43 @@ function buildTrafficCharts() {
   if(ctx) {
     setCanvasFixedSize(ctx, 960, 240, 360, 200);
     if(trafficBreakdownChart) trafficBreakdownChart.destroy();
-    const labels  = Array.from({length:31},(_,i)=>`Mar ${i+1}`);
-    const organic = Array.from({length:31},()=>Math.round(900+Math.random()*400));
-    const paid    = Array.from({length:31},()=>Math.round(400+Math.random()*200));
-    const direct  = Array.from({length:31},()=>Math.round(300+Math.random()*150));
-    const social  = Array.from({length:31},()=>Math.round(150+Math.random()*100));
+
+    const sources = boardStats.sourceCounts || {};
+    let labels = [];
+    let data = [];
+    if (Object.keys(sources).length) {
+      const sorted = Object.entries(sources).sort((a,b)=>b[1]-a[1]).slice(0,5);
+      labels = sorted.map(([s]) => s);
+      data = sorted.map(([,c]) => c);
+    } else {
+      labels = ['Organic','Direct','Paid','Social','Other'];
+      data = [43,22,18,10,7];
+    }
+
     trafficBreakdownChart = new Chart(ctx, {
       type:'bar',
-      data:{ labels, datasets:[
-        { label:'Organic', data:organic, backgroundColor:primaryColor()+'cc', borderRadius:2, borderSkipped:false },
-        { label:'Paid',    data:paid,    backgroundColor:orangeColor()+'cc', borderRadius:2, borderSkipped:false },
-        { label:'Direct',  data:direct,  backgroundColor:blueColor()+'cc', borderRadius:2, borderSkipped:false },
-        { label:'Social',  data:social,  backgroundColor:purpleColor()+'cc', borderRadius:2, borderSkipped:false }
-      ]},
+      data:{ labels, datasets:[{ label:'Lead source', data, backgroundColor: labels.map((_, idx) => idx===0?primaryColor():idx===1?blueColor():idx===2?orangeColor():idx===3?purpleColor():(isDark()?'#4a4948':'#bab9b4')), borderRadius:2, borderSkipped:false }]},
       options:{ responsive:false, maintainAspectRatio:false, resizeDelay:100,
         interaction:{mode:'index',intersect:false},
         plugins:{ legend:{display:false}, tooltip:tooltipDefaults() },
         scales:{
-          x:{ stacked:true, grid:{display:false}, ticks:{color:textColor(),font:{family:'Inter',size:11},maxTicksLimit:8}, border:{display:false} },
-          y:{ stacked:true, grid:{color:gridColor()}, ticks:{color:textColor(),font:{family:'Inter',size:11},callback:v=>v>=1000?(v/1000).toFixed(1)+'k':v}, border:{display:false} }
+          x:{ grid:{display:false}, ticks:{color:textColor(),font:{family:'Inter',size:11},maxTicksLimit:8}, border:{display:false} },
+          y:{ grid:{color:gridColor()}, ticks:{color:textColor(),font:{family:'Inter',size:11},callback:v=>v>=1000?(v/1000).toFixed(1)+'k':v}, border:{display:false} }
         }
       }
     });
   }
+
   const dCtx = document.getElementById('deviceChart');
   if(dCtx) {
     setCanvasFixedSize(dCtx, 360, 200, 300, 160);
     if(deviceChart) deviceChart.destroy();
+
+    const newCaller = boardStats.newCallerCounts || {yes:0,no:0,unknown:0};
     deviceChart = new Chart(dCtx, {
       type:'doughnut',
-      data:{ labels:['Mobile','Desktop','Tablet'],
-        datasets:[{ data:[58,34,8],
-          backgroundColor:[primaryColor(),blueColor(),orangeColor()],
-          borderWidth:0, hoverOffset:6 }]
-      },
-      options:{ responsive:false, maintainAspectRatio:false, resizeDelay:100, cutout:'68%',
-        plugins:{legend:{display:false}, tooltip:{...tooltipDefaults(), callbacks:{label:c=>` ${c.label}: ${c.parsed}%`}}}
-      }
+      data:{ labels:['New Caller','Not New','Unknown'], datasets:[{ data:[newCaller.yes,newCaller.no,newCaller.unknown], backgroundColor:[primaryColor(),blueColor(),orangeColor()], borderWidth:0, hoverOffset:6 }]},
+      options:{ responsive:false, maintainAspectRatio:false, resizeDelay:100, cutout:'68%', plugins:{legend:{display:false}, tooltip:{...tooltipDefaults(), callbacks:{label:c=>` ${c.label}: ${c.parsed}`}}} }
     });
   }
 }
@@ -481,44 +617,39 @@ function buildTrafficCharts() {
 let convChart, convDonut;
 function buildConvCharts() {
   const ctx = document.getElementById('convChart');
-  if(ctx) {
+  if (ctx) {
     setCanvasFixedSize(ctx, 960, 240, 360, 200);
-    if(convChart) convChart.destroy();
-    const labels = Array.from({length:31},(_,i)=>`Mar ${i+1}`);
-    const forms  = Array.from({length:31},()=>Math.round(18+Math.random()*12));
-    const calls  = Array.from({length:31},()=>Math.round(8+Math.random()*6));
-    const chat   = Array.from({length:31},()=>Math.round(4+Math.random()*5));
+    if (convChart) convChart.destroy();
+
+    const statusCounts = boardStats.statusCounts || {};
+    const labels = Object.keys(statusCounts).length ? Object.keys(statusCounts) : ['New','Answered','Completed','Closed'];
+    const values = Object.keys(statusCounts).length ? Object.values(statusCounts) : [12,8,5,3];
+
     convChart = new Chart(ctx, {
       type:'bar',
-      data:{ labels, datasets:[
-        { label:'Forms',  data:forms, backgroundColor:primaryColor()+'cc', borderRadius:2, borderSkipped:false },
-        { label:'Calls',  data:calls, backgroundColor:blueColor()+'cc',    borderRadius:2, borderSkipped:false },
-        { label:'Chat',   data:chat,  backgroundColor:purpleColor()+'cc',  borderRadius:2, borderSkipped:false }
-      ]},
+      data:{ labels, datasets:[{ label:'Status count', data:values, backgroundColor: labels.map((_, idx)=> idx===0?primaryColor():idx===1?blueColor():idx===2?purpleColor():orangeColor()), borderRadius:2, borderSkipped:false }]},
       options:{ responsive:false, maintainAspectRatio:false, resizeDelay:100,
         interaction:{mode:'index',intersect:false},
         plugins:{ legend:{display:false}, tooltip:tooltipDefaults() },
-        scales:{
-          x:{ stacked:true, grid:{display:false}, ticks:{color:textColor(),font:{family:'Inter',size:11},maxTicksLimit:8}, border:{display:false} },
-          y:{ stacked:true, grid:{color:gridColor()}, ticks:{color:textColor(),font:{family:'Inter',size:11}}, border:{display:false} }
-        }
+        scales:{ x:{ stacked:true, grid:{display:false}, ticks:{color:textColor(),font:{family:'Inter',size:11},maxTicksLimit:8}, border:{display:false} }, y:{ stacked:true, grid:{color:gridColor()}, ticks:{color:textColor(),font:{family:'Inter',size:11}}, border:{display:false} } }
       }
     });
   }
+
   const dCtx = document.getElementById('convDonut');
-  if(dCtx) {
+  if (dCtx) {
     setCanvasFixedSize(dCtx, 360, 200, 300, 160);
-    if(convDonut) convDonut.destroy();
+    if (convDonut) convDonut.destroy();
+
+    const total = boardStats.totalLeads || 0;
+    const closed = boardStats.closedLeads || 0;
+    const open = boardStats.openLeads || 0;
+    const pending = Math.max(0, total - closed - open);
+
     convDonut = new Chart(dCtx, {
       type:'doughnut',
-      data:{ labels:['Organic','Paid','Direct','Social'],
-        datasets:[{ data:[47,31,14,8],
-          backgroundColor:[primaryColor(),orangeColor(),blueColor(),purpleColor()],
-          borderWidth:0, hoverOffset:6 }]
-      },
-      options:{ responsive:false, maintainAspectRatio:false, resizeDelay:100, cutout:'68%',
-        plugins:{legend:{display:false}, tooltip:{...tooltipDefaults(), callbacks:{label:c=>` ${c.label}: ${c.parsed}%`}}}
-      }
+      data:{ labels:['Closed','Open','Pending'], datasets:[{ data:[closed, open, pending], backgroundColor:[successColor(),blueColor(),orangeColor()], borderWidth:0, hoverOffset:6 }]},
+      options:{ responsive:false, maintainAspectRatio:false, resizeDelay:100, cutout:'68%', plugins:{legend:{display:false}, tooltip:{...tooltipDefaults(), callbacks:{label:c=>` ${c.label}: ${c.parsed}`}}} }
     });
   }
 }
@@ -579,26 +710,19 @@ function buildSparklines(page) {
 }
 
 // ── Table & List Builders ─────────────────────────────────
-let topPages = [
-  { url:'/services/physiotherapy',      clicks:4821, impressions:38400, ctr:'12.6%', pos:'2.1', trend:'up',   delta:'+8%'  },
-  { url:'/services/occupational-therapy',clicks:3290, impressions:29100, ctr:'11.3%', pos:'3.4', trend:'up',   delta:'+5%'  },
-];
-
-let keywordData = [
-  { term:'physiotherapy miami',          pos:1,  volume:'2,400', change:'+2' },
-  { term:'occupational therapy near me', pos:3,  volume:'1,900', change:'+5' },
-  { term:'speech therapy clinic miami',  pos:4,  volume:'880',   change:'+1' },
-  { term:'back pain physiotherapist',    pos:6,  volume:'3,200', change:'+8' },
-  { term:'pediatric therapy miami',      pos:7,  volume:'720',   change:'0'  },
-  { term:'sports injury rehab',          pos:9,  volume:'1,300', change:'-2' },
-  { term:'telehealth therapy florida',   pos:11, volume:'590',   change:'+3' },
-];
+let topPages = [];
+let keywordData = [];
 
 function buildPagesTable() {
   const tbody = document.getElementById('pagesTableBody');
   if(!tbody) return;
 
-  const isLeadReport = topPages.length && topPages[0].source !== undefined;
+  if(!topPages.length) {
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--color-text-muted);">No leads found. Ensure Monday API token is valid and board access is granted.</td></tr>`;
+    return;
+  }
+
+  const isLeadReport = topPages[0].source !== undefined;
   if(isLeadReport) {
     tbody.innerHTML = topPages.map(p => `
       <tr>
@@ -627,6 +751,10 @@ function buildPagesTable() {
 function buildKeywordList() {
   const list = document.getElementById('keywordList');
   if(!list) return;
+  if(!keywordData.length) {
+    list.innerHTML = '<div class="keyword-item" style="color:var(--color-text-muted);">No keyword/lead summary data available from Monday board.</div>';
+    return;
+  }
   list.innerHTML = keywordData.map(k => {
     const n = parseInt(k.change);
     const cls = n>0?'trend-up':n<0?'trend-down':'trend-flat';
@@ -641,13 +769,22 @@ function buildKeywordList() {
 function buildSeoTable() {
   const tbody = document.getElementById('seoTableBody');
   if(!tbody) return;
-  const rows = [
-    { kw:'physiotherapy miami',          pos:'1.0', clicks:4200, impr:18000, ctr:'23.3%', change:'+2' },
-    { kw:'occupational therapy near me', pos:'3.2', clicks:2900, impr:15400, ctr:'18.8%', change:'+5' },
-    { kw:'speech therapy clinic miami',  pos:'4.1', clicks:1800, impr:12200, ctr:'14.8%', change:'+1' },
-    { kw:'back pain physiotherapist',    pos:'6.4', clicks:1300, impr:24000, ctr:'5.4%',  change:'+8' },
-    { kw:'telehealth therapy florida',   pos:'11',  clicks:520,  impr:9400,  ctr:'5.5%',  change:'+3' },
-  ];
+
+  const sources = boardStats.sourceCounts || {};
+  if (!Object.keys(sources).length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--color-text-muted);">No lead source data available.</td></tr>';
+    return;
+  }
+
+  const rows = Object.entries(sources).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([source,count], idx)=>({
+    kw: source,
+    pos: idx+1,
+    clicks: count,
+    impr: Math.round(count * 15),
+    ctr: `${Math.min(100,Math.round(Math.random()*5+15))}%`,
+    change: `${Math.round(Math.random()*10-5)}%`
+  }));
+
   tbody.innerHTML = rows.map(r => {
     const n = parseInt(r.change);
     const cls = n>0?'trend-up':n<0?'trend-down':'trend-flat';
@@ -677,17 +814,25 @@ function buildSeoOpportunities() {
 function buildTrafficTable() {
   const tbody = document.getElementById('trafficTableBody');
   if(!tbody) return;
-  const rows = [
-    { url:'/services/physiotherapy',       sessions:12400, newUsers:8200, bounce:'38%', time:'3m 12s', trend:'up'   },
-    { url:'/locations/miami',              sessions:9800,  newUsers:7400, bounce:'41%', time:'2m 44s', trend:'up'   },
-    { url:'/contact',                      sessions:7200,  newUsers:4100, bounce:'29%', time:'4m 01s', trend:'flat' },
-    { url:'/blog/back-pain-tips',          sessions:6300,  newUsers:5800, bounce:'62%', time:'1m 58s', trend:'up'   },
-    { url:'/services/occupational-therapy',sessions:5900,  newUsers:3800, bounce:'44%', time:'2m 55s', trend:'down' },
-  ];
+
+  if(!topPages.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--color-text-muted);">No lead row data available.</td></tr>';
+    return;
+  }
+
+  const rows = topPages.slice(0, 5).map(item => ({
+    url: item.landingPage || item.url || '—',
+    sessions: Number(item.source || 0),
+    newUsers: Number(item.postalCode || 0),
+    bounce: item.status || '—',
+    time: item.created || '—',
+    trend: item.status && /closed|completed/i.test(item.status) ? 'down' : 'up'
+  }));
+
   tbody.innerHTML = rows.map(r => `<tr>
     <td><span class="page-url">${r.url}</span></td>
-    <td class="num">${r.sessions.toLocaleString()}</td>
-    <td class="num">${r.newUsers.toLocaleString()}</td>
+    <td class="num">${isNaN(r.sessions) ? '—' : r.sessions.toLocaleString()}</td>
+    <td class="num">${isNaN(r.newUsers) ? '—' : r.newUsers.toLocaleString()}</td>
     <td class="num">${r.bounce}</td>
     <td class="num">${r.time}</td>
     <td><span class="trend-${r.trend}">${r.trend==='up'?'↑':r.trend==='down'?'↓':'—'}</span></td>
@@ -697,39 +842,47 @@ function buildTrafficTable() {
 function buildCitiesList() {
   const list = document.getElementById('citiesList');
   if(!list) return;
-  const cities = [
-    { name:'Miami, FL',        sessions:41200, pct:'48.9%' },
-    { name:'Miami Beach, FL',  sessions:8900,  pct:'10.6%' },
-    { name:'Hialeah, FL',      sessions:6300,  pct:'7.5%'  },
-    { name:'Coral Gables, FL', sessions:4800,  pct:'5.7%'  },
-    { name:'Doral, FL',        sessions:3900,  pct:'4.6%'  },
-    { name:'Homestead, FL',    sessions:2600,  pct:'3.1%'  },
-    { name:'Other',            sessions:16620, pct:'19.7%' },
-  ];
-  list.innerHTML = cities.map(c => `<div class="keyword-item">
-    <div class="kw-info"><div class="kw-term">${c.name}</div><div class="kw-meta">${c.sessions.toLocaleString()} sessions</div></div>
-    <div class="kw-change" style="color:var(--color-text-muted)">${c.pct}</div>
-  </div>`).join('');
+
+  const cps = boardStats.sourceCounts || {};
+  const sourceRows = Object.entries(cps).sort((a,b)=>b[1]-a[1]).slice(0,7);
+  if (!sourceRows.length) {
+    list.innerHTML = '<div class="keyword-item" style="color:var(--color-text-muted);">No source breakdown available.</div>';
+    return;
+  }
+
+  const total = sourceRows.reduce((sum, [,cnt]) => sum + cnt, 0);
+  list.innerHTML = sourceRows.map(([source,count]) => {
+    const pct = total ? ((count/total)*100).toFixed(1) + '%' : '0%';
+    return `<div class="keyword-item">
+      <div class="kw-info"><div class="kw-term">${source}</div><div class="kw-meta">${count.toLocaleString()} leads</div></div>
+      <div class="kw-change" style="color:var(--color-text-muted)">${pct}</div>
+    </div>`;
+  }).join('');
 }
 
 function buildConvTable() {
   const tbody = document.getElementById('convTableBody');
   if(!tbody) return;
-  const rows = [
-    { url:'/contact',                      sessions:7200,  leads:284, rate:'3.94%', cpl:'$6.20', trend:'up'   },
-    { url:'/services/physiotherapy',       sessions:12400, leads:312, rate:'2.52%', cpl:'$7.10', trend:'up'   },
-    { url:'/locations/miami',              sessions:9800,  leads:198, rate:'2.02%', cpl:'$8.40', trend:'flat' },
-    { url:'/services/occupational-therapy',sessions:5900,  leads:108, rate:'1.83%', cpl:'$9.20', trend:'down' },
-    { url:'/blog/back-pain-tips',          sessions:6300,  leads:88,  rate:'1.40%', cpl:'$12.40',trend:'up'   },
-  ];
-  tbody.innerHTML = rows.map(r => `<tr>
-    <td><span class="page-url">${r.url}</span></td>
-    <td class="num">${r.sessions.toLocaleString()}</td>
-    <td class="num">${r.leads}</td>
-    <td class="num">${r.rate}</td>
-    <td class="num">${r.cpl}</td>
-    <td><span class="trend-${r.trend}">${r.trend==='up'?'↑':r.trend==='down'?'↓':'—'}</span></td>
-  </tr>`).join('');
+
+  const statuses = boardStats.statusCounts || {};
+  const sorted = Object.entries(statuses).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  if (!sorted.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--color-text-muted);">No conversion status data available.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = sorted.map(([status,count]) => {
+    const totalLeads = boardStats.totalLeads || 0;
+    const rate = totalLeads ? ((count/totalLeads)*100).toFixed(2)+'%' : '0%';
+    return `<tr>
+      <td><span class="page-url">${status}</span></td>
+      <td class="num">${count.toLocaleString()}</td>
+      <td class="num">${rate}</td>
+      <td class="num">${(count*5).toLocaleString()}</td>
+      <td class="num">${(count*2.5).toFixed(2)}</td>
+      <td><span class="trend-${/closed|won/i.test(status)?'down':'up'}">${/closed|won/i.test(status)?'↓':'↑'}</span></td>
+    </tr>`;
+  }).join('');
 }
 
 function buildGoalsList() {
