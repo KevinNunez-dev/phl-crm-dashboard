@@ -88,6 +88,7 @@ function getSparkData(trend = 'up') {
 function makeSparkline(id, trend, color) {
   const canvas = document.getElementById(id);
   if(!canvas) return;
+  canvas.style.height = '40px';
   new Chart(canvas, {
     type: 'line',
     data: {
@@ -141,6 +142,7 @@ function buildTrafficChart() {
     },
     options: {
       responsive: true, maintainAspectRatio: false,
+      resizeDelay: 200,
       interaction: { mode: 'index', intersect: false },
       plugins: {
         legend: { display: false },
@@ -197,6 +199,7 @@ function buildSourceChart() {
     },
     options: {
       responsive: true, maintainAspectRatio: false,
+      resizeDelay: 200,
       cutout: '68%',
       plugins: {
         legend: { display: false },
