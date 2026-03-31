@@ -48,7 +48,6 @@ document.querySelectorAll('.chart-tab').forEach(tab => {
   tab.addEventListener('click', () => {
     tab.closest('.chart-tabs').querySelectorAll('.chart-tab').forEach(t => t.classList.remove('active'));
     tab.classList.add('active');
-    // In a real app, this would update the chart data
   });
 });
 
@@ -85,11 +84,16 @@ function getSparkData(trend = 'up') {
   });
 }
 
+const sparkInstances = {};
 function makeSparkline(id, trend, color) {
   const canvas = document.getElementById(id);
   if(!canvas) return;
+  // Destroy existing instance to prevent duplicate resize observers
+  if(sparkInstances[id]) { sparkInstances[id].destroy(); }
+  // Set explicit dimensions before Chart.js init — prevents ResizeObserver loop
   canvas.style.height = '40px';
-  new Chart(canvas, {
+  canvas.style.width = '100%';
+  sparkInstances[id] = new Chart(canvas, {
     type: 'line',
     data: {
       labels: Array(12).fill(''),
@@ -124,12 +128,13 @@ function buildTrafficChart() {
   const sessions  = Array.from({length: 31}, () => Math.round(2200 + Math.random() * 800));
   const organic   = Array.from({length: 31}, () => Math.round(900 + Math.random() * 400));
   const paid      = Array.from({length: 31}, () => Math.round(400 + Math.random() * 200));
-
   const primaryColor = isDark ? '#4f98a3' : '#01696f';
   const blueColor    = isDark ? '#5591c7' : '#006494';
   const orangeColor  = isDark ? '#fdab43' : '#da7101';
-
   if(trafficChart) trafficChart.destroy();
+  // Set explicit dimensions before init
+  ctx.style.width = '100%';
+  ctx.style.height = '240px';
   trafficChart = new Chart(ctx, {
     type: 'line',
     data: {
@@ -142,7 +147,7 @@ function buildTrafficChart() {
     },
     options: {
       responsive: true, maintainAspectRatio: false,
-      resizeDelay: 200,
+      resizeDelay: 100,
       interaction: { mode: 'index', intersect: false },
       plugins: {
         legend: { display: false },
@@ -185,8 +190,9 @@ function buildSourceChart() {
   const orange  = isDark ? '#fdab43' : '#da7101';
   const purple  = isDark ? '#a86fdf' : '#7a39bb';
   const faint   = isDark ? '#4a4948' : '#bab9b4';
-
   if(sourceChart) sourceChart.destroy();
+  ctx.style.width = '100%';
+  ctx.style.height = '200px';
   sourceChart = new Chart(ctx, {
     type: 'doughnut',
     data: {
@@ -199,7 +205,7 @@ function buildSourceChart() {
     },
     options: {
       responsive: true, maintainAspectRatio: false,
-      resizeDelay: 200,
+      resizeDelay: 100,
       cutout: '68%',
       plugins: {
         legend: { display: false },
@@ -284,6 +290,13 @@ function buildKeywordList() {
 function updateChartTheme() {
   buildTrafficChart();
   buildSourceChart();
+  const p = getComputedStyle(document.documentElement).getPropertyValue('--color-primary').trim() || '#4f98a3';
+  const s = getComputedStyle(document.documentElement).getPropertyValue('--color-success').trim() || '#6daa45';
+  const w = getComputedStyle(document.documentElement).getPropertyValue('--color-warning').trim() || '#bb653b';
+  const e = getComputedStyle(document.documentElement).getPropertyValue('--color-error').trim() || '#d163a7';
+  makeSparkline('spark1','up',p); makeSparkline('spark2','up',s);
+  makeSparkline('spark3','up',s); makeSparkline('spark4','up',w);
+  makeSparkline('spark5','down',e); makeSparkline('spark6','flat',p);
 }
 
 // ── Lucide Icons ──────────────────────────────────────────
@@ -296,7 +309,6 @@ buildSourceChart();
 buildPagesTable();
 buildKeywordList();
 
-// Sparklines
 const primary = getComputedStyle(document.documentElement).getPropertyValue('--color-primary').trim() || '#4f98a3';
 const success = getComputedStyle(document.documentElement).getPropertyValue('--color-success').trim() || '#6daa45';
 const warning = getComputedStyle(document.documentElement).getPropertyValue('--color-warning').trim() || '#bb653b';
