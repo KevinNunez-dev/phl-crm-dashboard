@@ -3,485 +3,358 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Lead Pulse — Analytics Dashboard</title>
+  <title>PHL Consolidated Leads Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300..700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
   <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
+  <div class="bg-orb orb-one"></div>
+  <div class="bg-orb orb-two"></div>
 
-<!-- Sidebar -->
-<aside class="sidebar" id="sidebar">
-  <div class="sidebar-header">
-    <div class="logo">
-      <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-label="Lead Pulse Logo">
-        <rect width="12" height="12" rx="3" fill="var(--color-primary)"/>
-        <rect x="16" width="12" height="12" rx="3" fill="var(--color-primary)" opacity="0.6"/>
-        <rect y="16" width="12" height="12" rx="3" fill="var(--color-primary)" opacity="0.6"/>
-        <rect x="16" y="16" width="12" height="12" rx="3" fill="var(--color-primary)" opacity="0.3"/>
-      </svg>
-      <span class="logo-text">Lead Pulse</span>
-    </div>
-    <button class="sidebar-toggle" id="sidebarToggle" aria-label="Toggle sidebar">
-      <i data-lucide="panel-left-close"></i>
-    </button>
-  </div>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand-row">
+        <div class="brand-mark" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+        <div>
+          <p class="eyebrow">Monday board dashboard</p>
+          <h2 class="brand-title">PHL Leads</h2>
+        </div>
+      </div>
 
-  <nav class="sidebar-nav">
-    <div class="nav-section">
-      <span class="nav-label">Main</span>
-      <a href="#overview" class="nav-item active" data-page="overview">
-        <i data-lucide="layout-dashboard"></i>
-        <span>Overview</span>
-      </a>
-      <a href="#seo" class="nav-item" data-page="seo">
-        <i data-lucide="search"></i>
-        <span>SEO</span>
-        <span class="badge badge-success">+12%</span>
-      </a>
-      <a href="#traffic" class="nav-item" data-page="traffic">
-        <i data-lucide="bar-chart-3"></i>
-        <span>Traffic</span>
-      </a>
-      <a href="#conversions" class="nav-item" data-page="conversions">
-        <i data-lucide="target"></i>
-        <span>Conversions</span>
-      </a>
-    </div>
+      <nav class="sidebar-nav">
+        <a href="#overview" class="nav-link active" data-section="overview">
+          <i data-lucide="layout-dashboard"></i>
+          <span>Overview</span>
+        </a>
+        <a href="#analysis" class="nav-link" data-section="analysis">
+          <i data-lucide="chart-column"></i>
+          <span>Analysis</span>
+        </a>
+        <a href="#table" class="nav-link" data-section="table">
+          <i data-lucide="table-properties"></i>
+          <span>Lead Table</span>
+        </a>
+        <a href="#settings" class="nav-link" data-section="settings">
+          <i data-lucide="settings-2"></i>
+          <span>Settings</span>
+        </a>
+      </nav>
 
-    <div class="nav-section">
-      <span class="nav-label">Channels</span>
-      <a href="#organic" class="nav-item" data-page="organic">
-        <i data-lucide="leaf"></i>
-        <span>Organic</span>
-      </a>
-      <a href="#paid" class="nav-item" data-page="paid">
-        <i data-lucide="zap"></i>
-        <span>Google Ads</span>
-      </a>
-      <a href="#social" class="nav-item" data-page="social">
-        <i data-lucide="share-2"></i>
-        <span>Social</span>
-      </a>
-    </div>
+      <div class="sidebar-card">
+        <p class="sidebar-card-label">Connected board</p>
+        <strong id="boardNameSidebar">PHL Consolidated Leads</strong>
+        <span id="sidebarBoardMeta">Waiting for sync</span>
+        <a
+          id="boardLink"
+          class="sidebar-link"
+          href="https://rptclinic.monday.com/boards/18404733134"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Open monday board
+        </a>
+      </div>
+    </aside>
 
-    <div class="nav-section nav-bottom">
-      <a href="#settings" class="nav-item" data-page="settings">
-        <i data-lucide="settings"></i>
-        <span>Settings</span>
-      </a>
-    </div>
-  </nav>
-</aside>
+    <div class="overlay" id="overlay"></div>
 
-<!-- Main Layout -->
-<div class="main-wrapper" id="mainWrapper">
-
-  <!-- Top Bar -->
-  <header class="topbar">
-    <div class="topbar-left">
-      <button class="icon-btn" id="mobileMenuBtn" aria-label="Open menu">
-        <i data-lucide="menu"></i>
-      </button>
-      <div class="breadcrumb">
-        <span class="breadcrumb-root">Lead Pulse</span>
-        <i data-lucide="chevron-right" class="breadcrumb-sep"></i>
-        <span class="breadcrumb-current" id="breadcrumbCurrent">Overview</span>
-      </div>
-    </div>
-    <div class="topbar-right">
-      <div class="date-range-picker">
-        <i data-lucide="calendar"></i>
-        <span>Mar 1 – Mar 31, 2026</span>
-        <i data-lucide="chevron-down"></i>
-      </div>
-      <button class="icon-btn" data-theme-toggle aria-label="Toggle theme">
-        <i data-lucide="moon"></i>
-      </button>
-      <button class="icon-btn" aria-label="Notifications">
-        <i data-lucide="bell"></i>
-        <span class="notif-dot"></span>
-      </button>
-      <div class="avatar" title="Your Account">KN</div>
-    </div>
-  </header>
-
-  <!-- ═══════════════════════════════════════════
-       PAGE: OVERVIEW
-  ════════════════════════════════════════════ -->
-  <main class="page-content" id="pageOverview">
-    <div class="page-header">
-      <div>
-        <h1 class="page-title">Overview</h1>
-        <p class="page-subtitle">March 2026 performance at a glance</p>
-      </div>
-      <div class="page-actions">
-        <button class="btn btn-ghost"><i data-lucide="download"></i> Export</button>
-        <button class="btn btn-primary"><i data-lucide="plus"></i> New Report</button>
-      </div>
-    </div>
-
-    <div class="kpi-grid">
-      <div class="kpi-card">
-        <div class="kpi-header"><span class="kpi-label">Total Sessions</span><span class="badge badge-success">+18.3%</span></div>
-        <div class="kpi-value" data-count="84320">0</div>
-        <div class="kpi-sub">vs 71,295 last month</div>
-        <canvas class="sparkline" id="spark1"></canvas>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-header"><span class="kpi-label">Organic Clicks</span><span class="badge badge-success">+12.1%</span></div>
-        <div class="kpi-value" data-count="36481">0</div>
-        <div class="kpi-sub">vs 32,541 last month</div>
-        <canvas class="sparkline" id="spark2"></canvas>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-header"><span class="kpi-label">Conversions</span><span class="badge badge-success">+7.4%</span></div>
-        <div class="kpi-value" data-count="1248">0</div>
-        <div class="kpi-sub">vs 1,162 last month</div>
-        <canvas class="sparkline" id="spark3"></canvas>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-header"><span class="kpi-label">Avg. Position</span><span class="badge badge-warning">+0.3</span></div>
-        <div class="kpi-value" data-count="4.2" data-decimal="true">0</div>
-        <div class="kpi-sub">vs 3.9 last month</div>
-        <canvas class="sparkline" id="spark4"></canvas>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-header"><span class="kpi-label">Bounce Rate</span><span class="badge badge-error">+2.1%</span></div>
-        <div class="kpi-value" data-count="42.7" data-suffix="%" data-decimal="true">0</div>
-        <div class="kpi-sub">vs 40.6% last month</div>
-        <canvas class="sparkline" id="spark5"></canvas>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-header"><span class="kpi-label">Ad Spend</span><span class="badge badge-neutral">–3.2%</span></div>
-        <div class="kpi-value" data-count="9420" data-prefix="$">0</div>
-        <div class="kpi-sub">vs $9,732 last month</div>
-        <canvas class="sparkline" id="spark6"></canvas>
-      </div>
-    </div>
-
-    <div class="charts-row">
-      <div class="chart-card chart-wide">
-        <div class="chart-header">
-          <div><h2 class="chart-title">Sessions & Organic Traffic</h2><p class="chart-subtitle">Daily — March 2026</p></div>
-          <div class="chart-tabs">
-            <button class="chart-tab active">Sessions</button>
-            <button class="chart-tab">Organic</button>
-            <button class="chart-tab">Paid</button>
+    <main class="main-panel">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button class="icon-btn mobile-only" id="mobileMenuBtn" aria-label="Open navigation">
+            <i data-lucide="menu"></i>
+          </button>
+          <div>
+            <p class="eyebrow">RPT Clinic workspace</p>
+            <h1 class="topbar-title">PHL Consolidated Leads Dashboard</h1>
+            <p class="topbar-subtitle" id="syncSummary">Loading monday board data...</p>
           </div>
         </div>
-        <div class="chart-wrap"><canvas id="trafficChart"></canvas></div>
-      </div>
-      <div class="chart-card chart-narrow">
-        <div class="chart-header"><div><h2 class="chart-title">Traffic Sources</h2><p class="chart-subtitle">Channel mix</p></div></div>
-        <div class="chart-wrap donut-wrap"><canvas id="sourceChart"></canvas></div>
-        <div class="legend">
-          <div class="legend-item"><span class="dot" style="background:var(--color-primary)"></span>Organic <strong>43%</strong></div>
-          <div class="legend-item"><span class="dot" style="background:var(--color-blue)"></span>Direct <strong>22%</strong></div>
-          <div class="legend-item"><span class="dot" style="background:var(--color-orange)"></span>Paid <strong>18%</strong></div>
-          <div class="legend-item"><span class="dot" style="background:var(--color-purple)"></span>Social <strong>10%</strong></div>
-          <div class="legend-item"><span class="dot" style="background:var(--color-text-faint)"></span>Other <strong>7%</strong></div>
+
+        <div class="topbar-actions">
+          <div class="sync-pill sync-pill-loading" id="syncPill">
+            <span class="sync-dot"></span>
+            <span id="syncStatus">Connecting</span>
+          </div>
+          <button class="btn btn-secondary" id="exportBtn" type="button">
+            <i data-lucide="download"></i>
+            <span>Export CSV</span>
+          </button>
+          <button class="btn btn-primary" id="refreshBtn" type="button">
+            <i data-lucide="refresh-cw"></i>
+            <span>Refresh</span>
+          </button>
+          <button class="icon-btn" data-theme-toggle type="button" aria-label="Toggle theme"></button>
         </div>
-      </div>
-    </div>
+      </header>
 
-    <div class="bottom-row">
-      <div class="table-card">
-        <div class="chart-header">
-          <div><h2 class="chart-title">Top Pages</h2><p class="chart-subtitle">By organic clicks this month</p></div>
-          <button class="btn btn-ghost btn-sm"><i data-lucide="external-link"></i> Full report</button>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Page</th><th class="num">Clicks</th><th class="num">Impressions</th><th class="num">CTR</th><th class="num">Position</th><th>Trend</th></tr></thead>
-            <tbody id="pagesTableBody"></tbody>
-          </table>
-        </div>
-      </div>
-      <div class="table-card keywords-card">
-        <div class="chart-header"><div><h2 class="chart-title">Keyword Rankings</h2><p class="chart-subtitle">Top movers this month</p></div></div>
-        <div class="keyword-list" id="keywordList"></div>
-      </div>
-    </div>
-  </main>
+      <div class="dashboard-scroll">
+        <section class="panel hero-panel" id="overview">
+          <div class="panel-header hero-header">
+            <div>
+              <p class="eyebrow">Board overview</p>
+              <h2>Clean readout of your monday lead table</h2>
+              <p class="panel-copy">
+                This dashboard now focuses on the actual columns from your
+                <strong>PHL Consolidated Leads</strong> board instead of generic SEO filler.
+              </p>
+            </div>
+            <div class="hero-meta">
+              <div class="hero-chip">
+                <span>Board ID</span>
+                <strong id="boardIdLabel">18404733134</strong>
+              </div>
+              <div class="hero-chip">
+                <span>Rows loaded</span>
+                <strong id="rowCountLabel">0</strong>
+              </div>
+              <div class="hero-chip">
+                <span>Last sync</span>
+                <strong id="lastUpdatedLabel">Not synced yet</strong>
+              </div>
+            </div>
+          </div>
 
-  <!-- ═══════════════════════════════════════════
-       PAGE: SEO
-  ════════════════════════════════════════════ -->
-  <main class="page-content hidden" id="pageSeo">
-    <div class="page-header">
-      <div><h1 class="page-title">SEO Performance</h1><p class="page-subtitle">Search visibility & keyword analysis — March 2026</p></div>
-      <div class="page-actions"><button class="btn btn-ghost"><i data-lucide="download"></i> Export</button></div>
-    </div>
-    <div class="kpi-grid">
-      <div class="kpi-card">
-        <div class="kpi-header"><span class="kpi-label">Organic Clicks</span><span class="badge badge-success">+12.1%</span></div>
-        <div class="kpi-value" data-count="36481">0</div>
-        <div class="kpi-sub">vs 32,541 last month</div>
-        <canvas class="sparkline" id="seoSpark1"></canvas>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-header"><span class="kpi-label">Impressions</span><span class="badge badge-success">+9.4%</span></div>
-        <div class="kpi-value" data-count="284000">0</div>
-        <div class="kpi-sub">vs 259,600 last month</div>
-        <canvas class="sparkline" id="seoSpark2"></canvas>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-header"><span class="kpi-label">Avg. CTR</span><span class="badge badge-success">+0.8%</span></div>
-        <div class="kpi-value" data-count="12.8" data-decimal="true" data-suffix="%">0</div>
-        <div class="kpi-sub">vs 12.0% last month</div>
-        <canvas class="sparkline" id="seoSpark3"></canvas>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-header"><span class="kpi-label">Avg. Position</span><span class="badge badge-warning">+0.3</span></div>
-        <div class="kpi-value" data-count="4.2" data-decimal="true">0</div>
-        <div class="kpi-sub">vs 3.9 last month</div>
-        <canvas class="sparkline" id="seoSpark4"></canvas>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-header"><span class="kpi-label">Indexed Pages</span><span class="badge badge-success">+6</span></div>
-        <div class="kpi-value" data-count="142">0</div>
-        <div class="kpi-sub">vs 136 last month</div>
-        <canvas class="sparkline" id="seoSpark5"></canvas>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-header"><span class="kpi-label">Backlinks</span><span class="badge badge-success">+23</span></div>
-        <div class="kpi-value" data-count="1847">0</div>
-        <div class="kpi-sub">vs 1,824 last month</div>
-        <canvas class="sparkline" id="seoSpark6"></canvas>
-      </div>
-    </div>
-    <div class="charts-row">
-      <div class="chart-card chart-wide">
-        <div class="chart-header"><div><h2 class="chart-title">Impressions vs Clicks</h2><p class="chart-subtitle">Daily organic — March 2026</p></div></div>
-        <div class="chart-wrap"><canvas id="seoChart"></canvas></div>
-      </div>
-      <div class="chart-card chart-narrow">
-        <div class="chart-header"><div><h2 class="chart-title">Top Keywords</h2><p class="chart-subtitle">By impressions share</p></div></div>
-        <div class="chart-wrap donut-wrap"><canvas id="seoDonut"></canvas></div>
-        <div class="legend">
-          <div class="legend-item"><span class="dot" style="background:var(--color-primary)"></span>Physiotherapy <strong>28%</strong></div>
-          <div class="legend-item"><span class="dot" style="background:var(--color-blue)"></span>Occupational <strong>19%</strong></div>
-          <div class="legend-item"><span class="dot" style="background:var(--color-orange)"></span>Speech Therapy <strong>15%</strong></div>
-          <div class="legend-item"><span class="dot" style="background:var(--color-purple)"></span>Rehab <strong>23%</strong></div>
-          <div class="legend-item"><span class="dot" style="background:var(--color-text-faint)"></span>Other <strong>15%</strong></div>
-        </div>
-      </div>
-    </div>
-    <div class="bottom-row">
-      <div class="table-card">
-        <div class="chart-header"><div><h2 class="chart-title">Keyword Performance</h2><p class="chart-subtitle">Top 7 by organic clicks</p></div></div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Keyword</th><th class="num">Position</th><th class="num">Clicks</th><th class="num">Impressions</th><th class="num">CTR</th><th>Change</th></tr></thead>
-            <tbody id="seoTableBody"></tbody>
-          </table>
-        </div>
-      </div>
-      <div class="table-card keywords-card">
-        <div class="chart-header"><div><h2 class="chart-title">Opportunities</h2><p class="chart-subtitle">Quick wins (pos 4–20)</p></div></div>
-        <div class="keyword-list" id="seoOpportunities"></div>
-      </div>
-    </div>
-  </main>
+          <div class="metric-grid">
+            <article class="metric-card">
+              <p class="metric-label">Total leads</p>
+              <div class="metric-value" id="metricTotalValue">0</div>
+              <p class="metric-note" id="metricTotalNote">Waiting for monday data</p>
+            </article>
+            <article class="metric-card">
+              <p class="metric-label">Answered</p>
+              <div class="metric-value" id="metricAnsweredValue">0</div>
+              <p class="metric-note" id="metricAnsweredNote">Status rows matching answered/open</p>
+            </article>
+            <article class="metric-card">
+              <p class="metric-label">Completed</p>
+              <div class="metric-value" id="metricCompletedValue">0</div>
+              <p class="metric-note" id="metricCompletedNote">Status rows matching completed/closed</p>
+            </article>
+            <article class="metric-card">
+              <p class="metric-label">New callers</p>
+              <div class="metric-value" id="metricNewCallerValue">0</div>
+              <p class="metric-note" id="metricNewCallerNote">Rows marked true/yes/new</p>
+            </article>
+            <article class="metric-card">
+              <p class="metric-label">Top source</p>
+              <div class="metric-value metric-value-text" id="metricTopSourceValue">-</div>
+              <p class="metric-note" id="metricTopSourceNote">No source data yet</p>
+            </article>
+            <article class="metric-card">
+              <p class="metric-label">Leads this week</p>
+              <div class="metric-value" id="metricWeekValue">0</div>
+              <p class="metric-note" id="metricWeekNote">Rolling last 7 days</p>
+            </article>
+          </div>
+        </section>
 
-  <!-- ═══════════════════════════════════════════
-       PAGE: TRAFFIC
-  ════════════════════════════════════════════ -->
-  <main class="page-content hidden" id="pageTraffic">
-    <div class="page-header">
-      <div><h1 class="page-title">Traffic Analysis</h1><p class="page-subtitle">Channel breakdown & session trends — March 2026</p></div>
-      <div class="page-actions"><button class="btn btn-ghost"><i data-lucide="download"></i> Export</button></div>
-    </div>
-    <div class="kpi-grid">
-      <div class="kpi-card">
-        <div class="kpi-header"><span class="kpi-label">Total Sessions</span><span class="badge badge-success">+18.3%</span></div>
-        <div class="kpi-value" data-count="84320">0</div>
-        <div class="kpi-sub">vs 71,295 last month</div>
-        <canvas class="sparkline" id="trfSpark1"></canvas>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-header"><span class="kpi-label">New Users</span><span class="badge badge-success">+22.4%</span></div>
-        <div class="kpi-value" data-count="51840">0</div>
-        <div class="kpi-sub">vs 42,356 last month</div>
-        <canvas class="sparkline" id="trfSpark2"></canvas>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-header"><span class="kpi-label">Pages / Session</span><span class="badge badge-success">+0.4</span></div>
-        <div class="kpi-value" data-count="3.8" data-decimal="true">0</div>
-        <div class="kpi-sub">vs 3.4 last month</div>
-        <canvas class="sparkline" id="trfSpark3"></canvas>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-header"><span class="kpi-label">Avg. Session</span><span class="badge badge-success">+14s</span></div>
-        <div class="kpi-value">2m 48s</div>
-        <div class="kpi-sub">vs 2m 34s last month</div>
-        <canvas class="sparkline" id="trfSpark4"></canvas>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-header"><span class="kpi-label">Bounce Rate</span><span class="badge badge-error">+2.1%</span></div>
-        <div class="kpi-value" data-count="42.7" data-decimal="true" data-suffix="%">0</div>
-        <div class="kpi-sub">vs 40.6% last month</div>
-        <canvas class="sparkline" id="trfSpark5"></canvas>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-header"><span class="kpi-label">Return Visitors</span><span class="badge badge-success">+4.2%</span></div>
-        <div class="kpi-value" data-count="38.6" data-decimal="true" data-suffix="%">0</div>
-        <div class="kpi-sub">vs 37.1% last month</div>
-        <canvas class="sparkline" id="trfSpark6"></canvas>
-      </div>
-    </div>
-    <div class="charts-row">
-      <div class="chart-card chart-wide">
-        <div class="chart-header"><div><h2 class="chart-title">Traffic by Channel</h2><p class="chart-subtitle">Daily sessions — March 2026</p></div></div>
-        <div class="chart-wrap"><canvas id="trafficBreakdownChart"></canvas></div>
-      </div>
-      <div class="chart-card chart-narrow">
-        <div class="chart-header"><div><h2 class="chart-title">Device Split</h2><p class="chart-subtitle">Sessions by device type</p></div></div>
-        <div class="chart-wrap donut-wrap"><canvas id="deviceChart"></canvas></div>
-        <div class="legend">
-          <div class="legend-item"><span class="dot" style="background:var(--color-primary)"></span>Mobile <strong>58%</strong></div>
-          <div class="legend-item"><span class="dot" style="background:var(--color-blue)"></span>Desktop <strong>34%</strong></div>
-          <div class="legend-item"><span class="dot" style="background:var(--color-orange)"></span>Tablet <strong>8%</strong></div>
-        </div>
-      </div>
-    </div>
-    <div class="bottom-row">
-      <div class="table-card">
-        <div class="chart-header"><div><h2 class="chart-title">Top Landing Pages</h2><p class="chart-subtitle">By sessions this month</p></div></div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Page</th><th class="num">Sessions</th><th class="num">New Users</th><th class="num">Bounce %</th><th class="num">Avg Time</th><th>Trend</th></tr></thead>
-            <tbody id="trafficTableBody"></tbody>
-          </table>
-        </div>
-      </div>
-      <div class="table-card keywords-card">
-        <div class="chart-header"><div><h2 class="chart-title">Top Cities</h2><p class="chart-subtitle">Sessions by location</p></div></div>
-        <div class="keyword-list" id="citiesList"></div>
-      </div>
-    </div>
-  </main>
+        <section class="analysis-grid" id="analysis">
+          <article class="panel chart-panel chart-span-2">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Timeline</p>
+                <h2>Leads by day</h2>
+              </div>
+              <p class="panel-copy">Uses the board's "Date of Lead" column when present, with item creation date as fallback.</p>
+            </div>
+            <div class="chart-wrap chart-wrap-wide">
+              <canvas id="leadsTimelineChart"></canvas>
+            </div>
+          </article>
 
-  <!-- ═══════════════════════════════════════════
-       PAGE: CONVERSIONS
-  ════════════════════════════════════════════ -->
-  <main class="page-content hidden" id="pageConversions">
-    <div class="page-header">
-      <div><h1 class="page-title">Conversions</h1><p class="page-subtitle">Lead & goal tracking — March 2026</p></div>
-      <div class="page-actions"><button class="btn btn-ghost"><i data-lucide="download"></i> Export</button></div>
-    </div>
-    <div class="kpi-grid">
-      <div class="kpi-card">
-        <div class="kpi-header"><span class="kpi-label">Total Leads</span><span class="badge badge-success">+7.4%</span></div>
-        <div class="kpi-value" data-count="1248">0</div>
-        <div class="kpi-sub">vs 1,162 last month</div>
-        <canvas class="sparkline" id="cvSpark1"></canvas>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-header"><span class="kpi-label">Conv. Rate</span><span class="badge badge-success">+0.4%</span></div>
-        <div class="kpi-value" data-count="1.48" data-decimal="true" data-suffix="%">0</div>
-        <div class="kpi-sub">vs 1.08% last month</div>
-        <canvas class="sparkline" id="cvSpark2"></canvas>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-header"><span class="kpi-label">Cost Per Lead</span><span class="badge badge-success">–8.2%</span></div>
-        <div class="kpi-value" data-count="7.55" data-decimal="true" data-prefix="$">0</div>
-        <div class="kpi-sub">vs $8.23 last month</div>
-        <canvas class="sparkline" id="cvSpark3"></canvas>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-header"><span class="kpi-label">Form Fills</span><span class="badge badge-success">+11%</span></div>
-        <div class="kpi-value" data-count="743">0</div>
-        <div class="kpi-sub">vs 669 last month</div>
-        <canvas class="sparkline" id="cvSpark4"></canvas>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-header"><span class="kpi-label">Phone Calls</span><span class="badge badge-success">+3.1%</span></div>
-        <div class="kpi-value" data-count="312">0</div>
-        <div class="kpi-sub">vs 303 last month</div>
-        <canvas class="sparkline" id="cvSpark5"></canvas>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-header"><span class="kpi-label">Chat Leads</span><span class="badge badge-success">+18%</span></div>
-        <div class="kpi-value" data-count="193">0</div>
-        <div class="kpi-sub">vs 163 last month</div>
-        <canvas class="sparkline" id="cvSpark6"></canvas>
-      </div>
-    </div>
-    <div class="charts-row">
-      <div class="chart-card chart-wide">
-        <div class="chart-header"><div><h2 class="chart-title">Daily Conversions</h2><p class="chart-subtitle">Leads by type — March 2026</p></div></div>
-        <div class="chart-wrap"><canvas id="convChart"></canvas></div>
-      </div>
-      <div class="chart-card chart-narrow">
-        <div class="chart-header"><div><h2 class="chart-title">Lead Sources</h2><p class="chart-subtitle">Where leads originate</p></div></div>
-        <div class="chart-wrap donut-wrap"><canvas id="convDonut"></canvas></div>
-        <div class="legend">
-          <div class="legend-item"><span class="dot" style="background:var(--color-primary)"></span>Organic <strong>47%</strong></div>
-          <div class="legend-item"><span class="dot" style="background:var(--color-orange)"></span>Paid <strong>31%</strong></div>
-          <div class="legend-item"><span class="dot" style="background:var(--color-blue)"></span>Direct <strong>14%</strong></div>
-          <div class="legend-item"><span class="dot" style="background:var(--color-purple)"></span>Social <strong>8%</strong></div>
-        </div>
-      </div>
-    </div>
-    <div class="bottom-row">
-      <div class="table-card">
-        <div class="chart-header"><div><h2 class="chart-title">Top Converting Pages</h2><p class="chart-subtitle">By conversion rate</p></div></div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Page</th><th class="num">Sessions</th><th class="num">Leads</th><th class="num">Conv. Rate</th><th class="num">CPL</th><th>Trend</th></tr></thead>
-            <tbody id="convTableBody"></tbody>
-          </table>
-        </div>
-      </div>
-      <div class="table-card keywords-card">
-        <div class="chart-header"><div><h2 class="chart-title">Goal Completions</h2><p class="chart-subtitle">By goal type</p></div></div>
-        <div class="keyword-list" id="goalsList"></div>
-      </div>
-    </div>
-  </main>
+          <article class="panel chart-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Source mix</p>
+                <h2>Lead sources</h2>
+              </div>
+            </div>
+            <div class="chart-wrap chart-wrap-donut">
+              <canvas id="sourceChart"></canvas>
+            </div>
+            <div class="legend-list" id="sourceLegend"></div>
+          </article>
 
-  <!-- ═══════════════════════════════════════════
-       PAGE: ORGANIC (stub)
-  ════════════════════════════════════════════ -->
-  <main class="page-content hidden" id="pageOrganic">
-    <div class="page-header"><div><h1 class="page-title">Organic Channel</h1><p class="page-subtitle">Detailed organic search breakdown — March 2026</p></div></div>
-    <div class="analysis-placeholder"><i data-lucide="leaf" class="analysis-icon"></i><p>Full organic breakdown coming soon.</p></div>
-  </main>
+          <article class="panel chart-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Pipeline snapshot</p>
+                <h2>Status breakdown</h2>
+              </div>
+            </div>
+            <div class="chart-wrap chart-wrap-bar">
+              <canvas id="statusChart"></canvas>
+            </div>
+          </article>
 
-  <!-- ═══════════════════════════════════════════
-       PAGE: PAID (stub)
-  ════════════════════════════════════════════ -->
-  <main class="page-content hidden" id="pagePaid">
-    <div class="page-header"><div><h1 class="page-title">Google Ads</h1><p class="page-subtitle">Paid search performance — March 2026</p></div></div>
-    <div class="analysis-placeholder"><i data-lucide="zap" class="analysis-icon"></i><p>Google Ads breakdown coming soon.</p></div>
-  </main>
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Source summary</p>
+                <h2>Channel distribution</h2>
+              </div>
+            </div>
+            <div class="stack-list" id="sourceBreakdownList"></div>
+          </article>
 
-  <!-- ═══════════════════════════════════════════
-       PAGE: SOCIAL (stub)
-  ════════════════════════════════════════════ -->
-  <main class="page-content hidden" id="pageSocial">
-    <div class="page-header"><div><h1 class="page-title">Social</h1><p class="page-subtitle">Social media traffic — March 2026</p></div></div>
-    <div class="analysis-placeholder"><i data-lucide="share-2" class="analysis-icon"></i><p>Social channel breakdown coming soon.</p></div>
-  </main>
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Recent activity</p>
+                <h2>Newest leads</h2>
+              </div>
+            </div>
+            <div class="stack-list" id="recentLeadsList"></div>
+          </article>
+        </section>
 
-  <!-- ═══════════════════════════════════════════
-       PAGE: SETTINGS (stub)
-  ════════════════════════════════════════════ -->
-  <main class="page-content hidden" id="pageSettings">
-    <div class="page-header"><div><h1 class="page-title">Settings</h1><p class="page-subtitle">Dashboard configuration</p></div></div>
-    <div class="analysis-placeholder"><i data-lucide="settings" class="analysis-icon"></i><p>Settings panel coming soon.</p></div>
-  </main>
+        <section class="panel" id="table">
+          <div class="panel-header panel-header-table">
+            <div>
+              <p class="eyebrow">Lead table</p>
+              <h2>Search, filter, and review your board rows</h2>
+            </div>
+            <p class="panel-copy" id="resultsSummary">0 leads shown</p>
+          </div>
 
-</div><!-- end main-wrapper -->
+          <div class="filters">
+            <label class="field field-search">
+              <span>Search</span>
+              <div class="input-with-icon">
+                <i data-lucide="search"></i>
+                <input id="searchInput" type="search" placeholder="Client, source, phone, zip, landing page" />
+              </div>
+            </label>
 
-<!-- Mobile Overlay -->
-<div class="overlay" id="overlay"></div>
+            <label class="field">
+              <span>Source</span>
+              <select id="sourceFilter">
+                <option value="all">All sources</option>
+              </select>
+            </label>
 
-<script src="assets/app.js"></script>
+            <label class="field">
+              <span>Status</span>
+              <select id="statusFilter">
+                <option value="all">All statuses</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span>New caller</span>
+              <select id="newCallerFilter">
+                <option value="all">All</option>
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+                <option value="unknown">Unknown</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span>Sort by</span>
+              <select id="sortFilter">
+                <option value="date-desc">Date of Lead (Newest)</option>
+                <option value="date-asc">Date of Lead (Oldest)</option>
+                <option value="client-asc">Client Name (A-Z)</option>
+                <option value="source-asc">Source (A-Z)</option>
+                <option value="status-asc">Status (A-Z)</option>
+              </select>
+            </label>
+
+            <div class="field field-actions">
+              <span>Actions</span>
+              <button class="btn btn-secondary btn-full" id="resetFiltersBtn" type="button">Reset filters</button>
+            </div>
+          </div>
+
+          <div class="table-container">
+            <table class="leads-table">
+              <thead>
+                <tr>
+                  <th>Status</th>
+                  <th>Client Name</th>
+                  <th>Date of Lead</th>
+                  <th>Source</th>
+                  <th>New Caller</th>
+                  <th>Postal Code</th>
+                  <th>Contact Number</th>
+                  <th>Landing Page URL</th>
+                </tr>
+              </thead>
+              <tbody id="leadsTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="settings-grid" id="settings">
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Connection</p>
+                <h2>Board settings</h2>
+              </div>
+            </div>
+
+            <div class="settings-form">
+              <label class="field">
+                <span>Board ID</span>
+                <input id="boardIdInput" type="text" inputmode="numeric" />
+              </label>
+
+              <label class="field">
+                <span>Monday API token</span>
+                <input id="apiTokenInput" type="password" autocomplete="off" />
+              </label>
+
+              <div class="settings-actions">
+                <button class="btn btn-primary" id="saveConfigBtn" type="button">Save local override</button>
+                <button class="btn btn-secondary" id="clearConfigBtn" type="button">Clear local override</button>
+              </div>
+            </div>
+
+            <p class="panel-note">
+              This is still a static frontend dashboard, so the monday token is being used in the browser.
+              That is workable for local/internal use, but a backend proxy would be safer for anything public.
+            </p>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Detected columns</p>
+                <h2>Board schema check</h2>
+              </div>
+            </div>
+            <div class="column-map" id="columnMap"></div>
+            <p class="panel-note">Helpful when monday column labels change and we need to adjust the mapping.</p>
+          </article>
+
+          <article class="panel settings-span-2">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Sync log</p>
+                <h2>Latest app events</h2>
+              </div>
+            </div>
+            <div class="log-list" id="statusLog">
+              <div class="empty-state">Waiting for first sync...</div>
+            </div>
+          </article>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script src="assets/app.js"></script>
 </body>
 </html>

@@ -1,930 +1,1052 @@
-/* =========================================================
-   LEAD PULSE — Dashboard App
-   ========================================================= */
-
-// ── Theme Toggle ──────────────────────────────────────────
-(function(){
-  const root = document.documentElement;
-  const btn  = document.querySelector('[data-theme-toggle]');
-  // Always start light
-  let theme = root.getAttribute('data-theme') || 'light';
-  root.setAttribute('data-theme', theme);
-  const MOON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
-  const SUN  = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>';
-  if(btn){ btn.innerHTML = theme === 'dark' ? SUN : MOON; }
-  if(btn) btn.addEventListener('click', () => {
-    theme = theme === 'dark' ? 'light' : 'dark';
-    root.setAttribute('data-theme', theme);
-    btn.innerHTML = theme === 'dark' ? SUN : MOON;
-    updateChartTheme();
-  });
-})();
-
-// ── Page Router ───────────────────────────────────────────
-const PAGE_MAP = {
-  overview:    'pageOverview',
-  seo:         'pageSeo',
-  traffic:     'pageTraffic',
-  conversions: 'pageConversions',
-  organic:     'pageOrganic',
-  paid:        'pagePaid',
-  social:      'pageSocial',
-  settings:    'pageSettings',
+const DEFAULT_CONFIG = {
+  apiUrl: "https://api.monday.com/v2",
+  boardId: "18404733134",
+  boardUrl: "https://rptclinic.monday.com/boards/18404733134",
+  apiToken: "eyJhbGciOiJIUzI1NiJ9.eyJ0aWQiOjY0MDEyNjI2OCwiYWFpIjoxMSwidWlkIjo5OTgxNTY5NCwiaWFkIjoiMjAyNi0wMy0zMVQxNzo0NTozNC4wMDBaIiwicGVyIjoibWU6d3JpdGUiLCJhY3RpZCI6NzQ3NTEwNiwicmduIjoidXNlMSJ9.I120BCWqcR0iZpFRzSz4K8Z8M7SPJ_eI33hVnn23sL4",
 };
 
-const BREADCRUMB_LABELS = {
-  overview: 'Overview', seo: 'SEO', traffic: 'Traffic',
-  conversions: 'Conversions', organic: 'Organic', paid: 'Google Ads',
-  social: 'Social', settings: 'Settings',
+const STORAGE_KEY = "phl-crm-dashboard-config";
+const MAX_LOG_ENTRIES = 8;
+
+const COLUMN_ALIASES = {
+  clientName: ["client name", "client", "full name", "name"],
+  dateOfLead: ["date of lead", "lead date", "date"],
+  source: ["source (campaign)", "source campaign", "lead source", "source", "campaign"],
+  landingPage: ["landing page url", "landing page", "url", "website"],
+  postalCode: ["postal code", "zip code", "zip", "postcode"],
+  contactNumber: ["contact number", "phone number", "phone", "contact"],
+  newCaller: ["new caller", "new caller?"],
+  status: ["status", "lead status", "stage", "pipeline stage"],
 };
 
-function navigateTo(page) {
-  // Hide all pages
-  Object.values(PAGE_MAP).forEach(id => {
-    const el = document.getElementById(id);
-    if(el) el.classList.add('hidden');
-  });
-  // Show target
-  const target = document.getElementById(PAGE_MAP[page]);
-  if(target) target.classList.remove('hidden');
-  // Update nav active state
-  document.querySelectorAll('.nav-item').forEach(item => {
-    item.classList.toggle('active', item.dataset.page === page);
-  });
-  // Update breadcrumb
-  const bc = document.getElementById('breadcrumbCurrent');
-  if(bc) bc.textContent = BREADCRUMB_LABELS[page] || page;
-  // Init charts for newly visible page
-  initPageCharts(page);
-  // Scroll to top
-  if(target) target.scrollTop = 0;
-  // Close mobile sidebar
-  const sidebar = document.getElementById('sidebar');
-  const overlay = document.getElementById('overlay');
-  if(sidebar && window.innerWidth <= 768) {
-    sidebar.classList.remove('mobile-open');
-    overlay.classList.remove('active');
-  }
-}
+const state = {
+  config: loadConfig(),
+  board: null,
+  leads: [],
+  filteredLeads: [],
+  metrics: null,
+  charts: {},
+  logs: [],
+};
 
-// Wire up all nav items
-document.querySelectorAll('.nav-item[data-page]').forEach(item => {
-  item.addEventListener('click', e => {
-    e.preventDefault();
-    navigateTo(item.dataset.page);
-  });
-});
-
-// ── Sidebar Toggle ────────────────────────────────────────
-const sidebar      = document.getElementById('sidebar');
-const mainWrapper  = document.getElementById('mainWrapper');
-const sidebarToggle = document.getElementById('sidebarToggle');
-const mobileMenuBtn = document.getElementById('mobileMenuBtn');
-const overlay      = document.getElementById('overlay');
-let sidebarCollapsed = false;
-
-sidebarToggle && sidebarToggle.addEventListener('click', () => {
-  sidebarCollapsed = !sidebarCollapsed;
-  sidebar.classList.toggle('collapsed', sidebarCollapsed);
-  mainWrapper.classList.toggle('expanded', sidebarCollapsed);
-});
-mobileMenuBtn && mobileMenuBtn.addEventListener('click', () => {
-  sidebar.classList.add('mobile-open');
-  overlay.classList.add('active');
-});
-overlay.addEventListener('click', () => {
-  sidebar.classList.remove('mobile-open');
-  overlay.classList.remove('active');
-});
-
-// ── Chart Tab Switching ───────────────────────────────────
-document.querySelectorAll('.chart-tab').forEach(tab => {
-  tab.addEventListener('click', () => {
-    tab.closest('.chart-tabs').querySelectorAll('.chart-tab').forEach(t => t.classList.remove('active'));
-    tab.classList.add('active');
-  });
-});
-
-// ── Helpers ───────────────────────────────────────────────
-function isDark() { return document.documentElement.getAttribute('data-theme') === 'dark'; }
-function gridColor() { return isDark() ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'; }
-function textColor() { return isDark() ? '#797876' : '#7a7974'; }
-const MONDAY_API_URL = 'https://api.monday.com/v2';
-const MONDAY_BOARD_ID = 18404733134; // PHL Consolidated Leads
-// Put your real token here, or use a backend proxy (strongly recommended)
-const MONDAY_API_TOKEN = 'eyJhbGciOiJIUzI1NiJ9.eyJ0aWQiOjY0MDEyNjI2OCwiYWFpIjoxMSwidWlkIjo5OTgxNTY5NCwiaWFkIjoiMjAyNi0wMy0zMVQxNzo0NTozNC4wMDBaIiwicGVyIjoibWU6d3JpdGUiLCJhY3RpZCI6NzQ3NTEwNiwicmduIjoidXNlMSJ9.I120BCWqcR0iZpFRzSz4K8Z8M7SPJ_eI33hVnn23sL4';
-
-function tooltipDefaults() {
-  return {
-    backgroundColor: isDark() ? '#1a1917' : '#ffffff',
-    borderColor: isDark() ? '#323130' : '#d4d1ca',
-    borderWidth: 1,
-    titleColor: isDark() ? '#cdccca' : '#28251d',
-    bodyColor: isDark() ? '#797876' : '#7a7974',
-    padding: 10, cornerRadius: 8,
-    titleFont: { family: 'Inter', size: 12, weight: 600 },
-    bodyFont:  { family: 'Inter', size: 11 }
-  };
-}
-
-async function fetchMondayData() {
-  if (!MONDAY_API_TOKEN || MONDAY_API_TOKEN === 'eyJhbGciOiJIUzI1NiJ9.eyJ0aWQiOjY0MDEyNjI2OCwiYWFpIjoxMSwidWlkIjo5OTgxNTY5NCwiaWFkIjoiMjAyNi0wMy0zMVQxNzo0NTozNC4wMDBaIiwicGVyIjoibWU6d3JpdGUiLCJhY3RpZCI6NzQ3NTEwNiwicmduIjoidXNlMSJ9.I120BCWqcR0iZpFRzSz4K8Z8M7SPJ_eI33hVnn23sL4') {
-    console.warn('Monday API token not configured. Please set a valid personal API token from Monday.com.');
-    return null;
-  }
-
-  const query = `query ($boardId: Int!) {
-    boards(ids: [$boardId]) {
-      items {
-        id
-        name
-        created_at
-        column_values {
-          id
-          title
-          text
-          value
-        }
-      }
-    }
-  }`;
-
+function loadConfig() {
   try {
-    console.log('Monday API query board id', MONDAY_BOARD_ID);
-    const res = await fetch(MONDAY_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: MONDAY_API_TOKEN
-      },
-      body: JSON.stringify({ query, variables: { boardId: MONDAY_BOARD_ID } })
-    });
-
-    if (res.status === 401 || res.status === 403) {
-      console.error('Monday API token invalid or unauthorized (401/403). Use a personal API token, not client secret.');
-      return null;
-    }
-
-    const json = await res.json();
-    console.log('Monday API response', json);
-    if (json.errors) {
-      console.error('Monday API errors', json.errors);
-      return null;
-    }
-    if (!json.data?.boards?.[0]) {
-      console.warn('Monday API empty board data', json);
-      return null;
-    }
-    return json.data.boards[0];
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return { ...DEFAULT_CONFIG };
+    const parsed = JSON.parse(raw);
+    return { ...DEFAULT_CONFIG, ...parsed };
   } catch (error) {
-    console.error('Monday API fetch failed', error);
+    return { ...DEFAULT_CONFIG };
+  }
+}
+
+function saveConfig(config) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+}
+
+function clearConfig() {
+  localStorage.removeItem(STORAGE_KEY);
+  state.config = { ...DEFAULT_CONFIG };
+}
+
+function normalize(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function safeJsonParse(value) {
+  if (!value || typeof value !== "string") return null;
+  try {
+    return JSON.parse(value);
+  } catch (error) {
     return null;
   }
 }
 
-function numberFromValue(value, fallback = 0) {
-  if (!value || typeof value !== 'string') return fallback;
-  const num = Number(value.replace(/[%,\s]/g, ''));
-  return Number.isFinite(num) ? num : fallback;
+function formatNumber(value) {
+  return Number(value || 0).toLocaleString();
 }
 
-function findCol(item, keys) {
-  if (!item.column_values) return null;
-  const norm = k => k.trim().toLowerCase();
-  return item.column_values.find(cv => {
-    const id = (cv.id || '').trim().toLowerCase();
-    const title = (cv.title || '').trim().toLowerCase();
-    const text = (cv.text || '').trim().toLowerCase();
-    return keys.some(k => {
-      const nk = norm(k);
-      return id === nk || title === nk || text === nk || title.includes(nk) || text.includes(nk);
-    });
+function formatDate(value) {
+  if (!value) return "No date";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "No date";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+}
+
+function formatDateTime(value) {
+  if (!value) return "Not synced yet";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "Not synced yet";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+function getThemeIconMarkup() {
+  const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+  if (isDark) {
+    return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"></path></svg>';
+  }
+  return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3c0.28 0 0.55 0.02 0.82 0.05A7 7 0 0 0 21 12.79z"></path></svg>';
+}
+
+function updateThemeButton() {
+  const button = document.querySelector("[data-theme-toggle]");
+  if (button) button.innerHTML = getThemeIconMarkup();
+}
+
+function logEvent(message, tone = "info") {
+  const entry = { message, tone, time: new Date() };
+  state.logs.unshift(entry);
+  state.logs = state.logs.slice(0, MAX_LOG_ENTRIES);
+  renderLogs();
+}
+
+function renderLogs() {
+  const logRoot = document.getElementById("statusLog");
+  if (!logRoot) return;
+
+  if (!state.logs.length) {
+    logRoot.innerHTML = '<div class="empty-state">Waiting for first sync...</div>';
+    return;
+  }
+
+  logRoot.innerHTML = state.logs
+    .map((entry) => {
+      const pillClass =
+        entry.tone === "error"
+          ? "pill-danger"
+          : entry.tone === "success"
+            ? "pill-success"
+            : entry.tone === "warning"
+              ? "pill-warning"
+              : "pill-primary";
+
+      return `
+        <div class="log-row">
+          <span class="log-time">${escapeHtml(
+            new Intl.DateTimeFormat("en-US", {
+              hour: "numeric",
+              minute: "2-digit",
+              second: "2-digit",
+            }).format(entry.time),
+          )}</span>
+          <div class="log-copy">
+            <p class="log-message">${escapeHtml(entry.message)}</p>
+          </div>
+          <span class="pill ${pillClass}">${escapeHtml(entry.tone)}</span>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function setSyncState(status, message) {
+  const pill = document.getElementById("syncPill");
+  const label = document.getElementById("syncStatus");
+  const summary = document.getElementById("syncSummary");
+  if (!pill || !label || !summary) return;
+
+  pill.classList.remove("sync-pill-loading", "sync-pill-success", "sync-pill-error");
+  if (status === "success") pill.classList.add("sync-pill-success");
+  else if (status === "error") pill.classList.add("sync-pill-error");
+  else pill.classList.add("sync-pill-loading");
+
+  label.textContent = status === "success" ? "Synced" : status === "error" ? "Error" : "Connecting";
+  summary.textContent = message;
+}
+
+function getColumnTitle(columnValue) {
+  return columnValue?.column?.title || columnValue?.id || "";
+}
+
+function findColumnValue(item, aliases) {
+  const wanted = aliases.map(normalize);
+  return (item.column_values || []).find((columnValue) => {
+    const title = normalize(getColumnTitle(columnValue));
+    const id = normalize(columnValue.id);
+    return wanted.some((alias) => title === alias || id === alias || title.includes(alias));
   });
 }
 
-function getColText(item, keys, fallback = '') {
-  const col = findCol(item, keys);
-  if (!col) return fallback;
-  if (col.text !== undefined && col.text !== null && col.text !== '') return col.text;
-  if (col.value !== undefined && col.value !== null && col.value !== '') {
-    // Board values may be JSON for various column types
-    try {
-      const parsed = JSON.parse(col.value);
-      if (parsed) {
-        if (typeof parsed === 'string') return parsed;
-        if (parsed.text) return parsed.text;
-        if (parsed.label) return parsed.label;
-        if (parsed.name) return parsed.name;
-        if (Array.isArray(parsed) && parsed.length) {
-          // Person or tags may come as arrays
-          return parsed.map(p => p.name || p.text || p.label || p).filter(Boolean).join(', ');
-        }
-        if (parsed.person) return parsed.person.name || parsed.person.email || '';
-      }
-    } catch (e) {
-      // not JSON
+function extractColumnText(columnValue) {
+  if (!columnValue) return "";
+  if (columnValue.text) return String(columnValue.text).trim();
+
+  const parsed = safeJsonParse(columnValue.value);
+  if (parsed) {
+    if (typeof parsed === "string") return parsed.trim();
+    if (parsed.text) return String(parsed.text).trim();
+    if (parsed.label) return String(parsed.label).trim();
+    if (parsed.url) return String(parsed.url).trim();
+    if (parsed.phone) return String(parsed.phone).trim();
+    if (parsed.name) return String(parsed.name).trim();
+    if (Array.isArray(parsed)) {
+      return parsed
+        .map((entry) => entry?.name || entry?.label || entry?.text || entry)
+        .filter(Boolean)
+        .join(", ");
     }
-    return String(col.value);
   }
-  return fallback;
+
+  if (columnValue.value && typeof columnValue.value === "string") {
+    return columnValue.value.trim();
+  }
+
+  return "";
 }
 
-function parseLeadDate(raw) {
-  if (!raw) return null;
-  const d = new Date(raw);
-  if (!isNaN(d.getTime())) return d.toISOString().slice(0,10);
-  const n = Date.parse(raw);
-  if (!isNaN(n)) return new Date(n).toISOString().slice(0,10);
+function extractDateFromColumn(columnValue) {
+  if (!columnValue) return null;
+
+  const parsed = safeJsonParse(columnValue.value);
+  if (parsed?.date) {
+    const stamp = parsed.time ? `${parsed.date}T${parsed.time}` : `${parsed.date}T00:00:00`;
+    const parsedDate = new Date(stamp);
+    if (!Number.isNaN(parsedDate.getTime())) return parsedDate;
+  }
+
+  const text = extractColumnText(columnValue);
+  if (text) {
+    const parsedDate = new Date(text);
+    if (!Number.isNaN(parsedDate.getTime())) return parsedDate;
+  }
+
   return null;
 }
 
-function updateKpiCounters(stats) {
-  const kpiVisits = document.querySelector('.kpi-card:nth-child(1) .kpi-value');
-  if (kpiVisits) { kpiVisits.dataset.count = (stats.totalLeads || 0).toString(); }
-  const kpiImpr = document.querySelector('.kpi-card:nth-child(2) .kpi-value');
-  if (kpiImpr) { kpiImpr.dataset.count = (stats.openLeads || 0).toString(); }
-  const kpiConv = document.querySelector('.kpi-card:nth-child(3) .kpi-value');
-  if (kpiConv) { kpiConv.dataset.count = (stats.closedLeads || 0).toString(); }
+function toYesNoUnknown(value) {
+  const normalized = normalize(value);
+  if (/^(yes|true|new|1)/.test(normalized)) return "yes";
+  if (/^(no|false|0)/.test(normalized)) return "no";
+  return "unknown";
 }
 
-let boardStats = {
-  totalLeads: 0,
-  openLeads: 0,
-  closedLeads: 0,
-  dateCounts: {},
-  sourceCounts: {},
-  statusCounts: {},
-  newCallerCounts: { yes: 0, no: 0, unknown: 0 }
-};
+function getStatusTone(status) {
+  const normalized = normalize(status);
+  if (/completed|closed|won|converted/.test(normalized)) return "success";
+  if (/new|pending|follow up|waiting/.test(normalized)) return "warning";
+  if (/missed|lost|cancelled|spam/.test(normalized)) return "danger";
+  return "primary";
+}
 
-function buildMondayMappedData(board) {
-  if (!board?.items || !board.items.length) {
-    console.warn('Monday board has no items:', board);
-    return;
-  }
+function parseLead(item) {
+  const clientNameValue = findColumnValue(item, COLUMN_ALIASES.clientName);
+  const dateValue = findColumnValue(item, COLUMN_ALIASES.dateOfLead);
+  const sourceValue = findColumnValue(item, COLUMN_ALIASES.source);
+  const landingValue = findColumnValue(item, COLUMN_ALIASES.landingPage);
+  const postalValue = findColumnValue(item, COLUMN_ALIASES.postalCode);
+  const contactValue = findColumnValue(item, COLUMN_ALIASES.contactNumber);
+  const newCallerValue = findColumnValue(item, COLUMN_ALIASES.newCaller);
+  const statusValue = findColumnValue(item, COLUMN_ALIASES.status);
 
-  // Debug: log exactly which columns exist in board items
-  const columnKeys = new Set();
-  board.items.forEach(item => {
-    item.column_values?.forEach(cv => {
-      const key = cv.title || cv.id || '(unknown)';
-      columnKeys.add(key);
-    });
-  });
-  console.log('Monday board columns detected:', Array.from(columnKeys));
+  const clientName = extractColumnText(clientNameValue) || "";
+  const landingPage = extractColumnText(landingValue);
+  const status = extractColumnText(statusValue) || item.name || "Unspecified";
+  const leadDate = extractDateFromColumn(dateValue) || new Date(item.created_at);
 
-  const knownItems = board.items.slice(0, 30);
-
-  topPages = knownItems.map(item => {
-    const itemStatus    = getColText(item, ['status', 'lead status', 'stage']);
-    const newCaller     = getColText(item, ['new caller?', 'new caller', 'caller']);
-    const dateLead      = getColText(item, ['date of lead', 'date', 'created_at']);
-    const source        = getColText(item, ['source (campaign)', 'source', 'campaign', 'lead source']);
-    const clientName    = getColText(item, ['client name', 'client', 'name', 'item']);
-    const landingPage   = getColText(item, ['landing page url', 'landing page', 'url']);
-    const postalCode    = getColText(item, ['postal code', 'zip', 'postcode']);
-    const contactNumber = getColText(item, ['contact number', 'phone', 'contact']);
-
-    // Keep all raw column values for debugging if needed
-    const raw = item.column_values?.reduce((acc, cv) => {
-      const key = cv.title || cv.id || 'unknown';
-      acc[key] = { text: cv.text, value: cv.value };
-      return acc;
-    }, {}) || {};
-
-    return {
-      url: clientName || item.name || 'Unnamed lead',
-      source: source || 'Unknown',
-      status: itemStatus || 'Unspecified',
-      owner: newCaller || '—',
-      created: dateLead || (item.created_at ? new Date(item.created_at).toLocaleString() : 'N/A'),
-      phone: contactNumber || '—',
-      email: landingPage || '—',
-      landingPage,
-      postalCode,
-      raw
-    };
-  });
-
-  keywordData = knownItems.slice(0, 7).map((item, idx) => {
-    return {
-      term: getColText(item, ['client name', 'name', 'item']) || item.name || `Lead ${idx + 1}`,
-      pos: getColText(item, ['status', 'stage', 'new caller?']) || 'No status',
-      volume: getColText(item, ['source (campaign)', 'source', 'lead source']) || 'Unknown',
-      change: getColText(item, ['postal code', 'contact number', 'landing page url']) || '–'
-    };
-  });
-
-  // Build board-specific stats
-  boardStats = {
-    totalLeads: topPages.length,
-    openLeads: topPages.filter(l => /new|open|pending|answered/i.test(l.status)).length,
-    closedLeads: topPages.filter(l => /won|closed|completed|converted/i.test(l.status)).length,
-    dateCounts: {},
-    sourceCounts: {},
-    statusCounts: {},
-    newCallerCounts: { yes: 0, no: 0, unknown: 0 }
+  return {
+    itemId: item.id,
+    mondayItemName: item.name || "",
+    clientName,
+    displayName: clientName || item.name || "Unnamed lead",
+    status,
+    source: extractColumnText(sourceValue) || "Unknown",
+    newCallerRaw: extractColumnText(newCallerValue),
+    newCaller: toYesNoUnknown(extractColumnText(newCallerValue)),
+    postalCode: extractColumnText(postalValue) || "-",
+    contactNumber: extractColumnText(contactValue) || "-",
+    landingPage: landingPage || "",
+    leadDate,
+    leadDateLabel: formatDateTime(leadDate),
+    createdAt: item.created_at ? new Date(item.created_at) : null,
   };
-
-  topPages.forEach(lead => {
-    const leadDate = parseLeadDate(lead.created);
-    if (leadDate) {
-      boardStats.dateCounts[leadDate] = (boardStats.dateCounts[leadDate] || 0) + 1;
-    }
-
-    const src = (lead.source || 'Unknown').trim();
-    boardStats.sourceCounts[src] = (boardStats.sourceCounts[src] || 0) + 1;
-
-    const status = (lead.status || 'Unspecified').trim();
-    boardStats.statusCounts[status] = (boardStats.statusCounts[status] || 0) + 1;
-
-    const newCaller = (lead.owner || '').toString().trim().toLowerCase();
-    if (/^(yes|true|y|1|new)/.test(newCaller)) boardStats.newCallerCounts.yes += 1;
-    else if (/^(no|false|n|0)/.test(newCaller)) boardStats.newCallerCounts.no += 1;
-    else boardStats.newCallerCounts.unknown += 1;
-  });
-
-  updateKpiCounters(boardStats);
-
-  const tableHeadRow = document.querySelector('#pagesTableBody')?.closest('table')?.querySelector('thead tr');
-  if (tableHeadRow) {
-    tableHeadRow.innerHTML = '<th>Lead</th><th>Source</th><th>Status</th><th>New Caller</th><th>Date of Lead</th><th>Landing Page</th><th>Postal Code</th><th>Contact</th>';
-  }
 }
 
-
-function primaryColor() { return isDark() ? '#4f98a3' : '#01696f'; }
-function blueColor()    { return isDark() ? '#5591c7' : '#006494'; }
-function orangeColor()  { return isDark() ? '#fdab43' : '#da7101'; }
-function successColor() { return isDark() ? '#6daa45' : '#437a22'; }
-function errorColor()   { return isDark() ? '#d163a7' : '#a12c7b'; }
-function purpleColor()  { return isDark() ? '#a86fdf' : '#7a39bb'; }
-
-// ── KPI Counter Animation ─────────────────────────────────
-function animateCounters(scope) {
-  const root = scope || document;
-  root.querySelectorAll('.kpi-value[data-count]').forEach(el => {
-    const target    = parseFloat(el.dataset.count);
-    const isDecimal = el.dataset.decimal === 'true';
-    const prefix    = el.dataset.prefix || '';
-    const suffix    = el.dataset.suffix || '';
-    const duration  = 1200;
-    const start     = performance.now();
-    function tick(now) {
-      const progress = Math.min((now - start) / duration, 1);
-      const eased    = 1 - Math.pow(1 - progress, 3);
-      const current  = target * eased;
-      const formatted = isDecimal ? current.toFixed(1) : Math.floor(current).toLocaleString();
-      el.textContent = prefix + formatted + suffix;
-      if(progress < 1) requestAnimationFrame(tick);
-    }
-    requestAnimationFrame(tick);
-  });
-}
-
-// ── Sparklines ────────────────────────────────────────────
-function getSparkData(trend = 'up') {
-  const base = trend === 'up' ? 60 : trend === 'down' ? 80 : 70;
-  return Array.from({length: 12}, (_, i) => {
-    const noise = (Math.random() - 0.5) * 20;
-    const drift = trend === 'up' ? i * 2.5 : trend === 'down' ? -i * 2 : 0;
-    return Math.max(20, base + drift + noise);
-  });
-}
-
-function setCanvasFixedSize(canvas, desktopWidth, desktopHeight, mobileWidth, mobileHeight) {
-  if (!canvas) return;
-  const isMobile = window.innerWidth <= 768;
-  const width = isMobile ? mobileWidth : desktopWidth;
-  const height = isMobile ? mobileHeight : desktopHeight;
-  canvas.style.width = `${width}px`;
-  canvas.style.height = `${height}px`;
-  const pixelRatio = window.devicePixelRatio || 1;
-  canvas.width = Math.floor(width * pixelRatio);
-  canvas.height = Math.floor(height * pixelRatio);
-}
-
-const sparkInstances = {};
-function makeSparkline(id, trend, color) {
-  const canvas = document.getElementById(id);
-  if(!canvas) return;
-  setCanvasFixedSize(canvas, 180, 40, 120, 36);
-  if(sparkInstances[id]) { sparkInstances[id].destroy(); delete sparkInstances[id]; }
-  sparkInstances[id] = new Chart(canvas, {
-    type: 'line',
-    data: {
-      labels: Array(12).fill(''),
-      datasets: [{ data: getSparkData(trend), borderColor: color, borderWidth: 2,
-        fill: true, backgroundColor: color + '22', pointRadius: 0, tension: 0.4 }]
+async function mondayRequest(query, variables) {
+  const response = await fetch(state.config.apiUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: state.config.apiToken,
     },
-    options: {
-      responsive: false, maintainAspectRatio: false,
-      animation: { duration: 800 },
-      plugins: { legend: { display: false }, tooltip: { enabled: false } },
-      scales: { x: { display: false }, y: { display: false } }
-    }
+    body: JSON.stringify({ query, variables }),
   });
-}
 
-// ── Main Traffic Chart ────────────────────────────────────
-let trafficChart;
-function buildTrafficChart() {
-  const ctx = document.getElementById('trafficChart');
-  if(!ctx) return;
-  setCanvasFixedSize(ctx, 960, 240, 360, 200);
+  const payload = await response.json();
 
-  const dateCounts = boardStats.dateCounts || {};
-  const sourceCounts = boardStats.sourceCounts || {};
-
-  let labels = [], sessions = [], organic = [], paid = [];
-
-  if (Object.keys(dateCounts).length) {
-    labels = Object.keys(dateCounts).sort();
-    sessions = labels.map(d => dateCounts[d] || 0);
-
-    const postings = Object.entries(sourceCounts).reduce((acc, [source, count]) => {
-      const lower = source.trim().toLowerCase();
-      if (/organic/.test(lower)) acc.organic += count;
-      else if (/paid|pmax|google|ads/.test(lower)) acc.paid += count;
-      else acc.other += count;
-      return acc;
-    }, {organic:0, paid:0, other:0});
-
-    const totalSource = postings.organic + postings.paid + postings.other || 1;
-    const organicRatio = postings.organic / totalSource;
-    const paidRatio = postings.paid / totalSource;
-
-    organic = sessions.map(val => Math.round(val * organicRatio));
-    paid = sessions.map(val => Math.round(val * paidRatio));
-  } else {
-    labels = Array.from({length: 31}, (_, i) => `Mar ${i+1}`);
-    sessions = Array.from({length: 31}, () => Math.round(2200 + Math.random() * 800));
-    organic = Array.from({length: 31}, () => Math.round(900  + Math.random() * 400));
-    paid     = Array.from({length: 31}, () => Math.round(400  + Math.random() * 200));
+  if (!response.ok) {
+    const errorText = payload?.error_message || payload?.errors?.[0]?.message || `HTTP ${response.status}`;
+    throw new Error(errorText);
   }
 
-  if(trafficChart) trafficChart.destroy();
-  trafficChart = new Chart(ctx, {
-    type: 'line',
-    data: { labels, datasets: [
-      { label:'Sessions', data:sessions, borderColor:primaryColor(), backgroundColor:primaryColor()+'18', fill:true, borderWidth:2, pointRadius:0, tension:0.4 },
-      { label:'Organic',  data:organic,  borderColor:blueColor(),   backgroundColor:'transparent', borderWidth:1.5, pointRadius:0, tension:0.4, borderDash:[4,3] },
-      { label:'Paid',     data:paid,     borderColor:orangeColor(), backgroundColor:'transparent', borderWidth:1.5, pointRadius:0, tension:0.4, borderDash:[4,3] }
-    ]},
-    options: {
-      responsive:false, maintainAspectRatio:false, resizeDelay:100,
-      interaction:{ mode:'index', intersect:false },
-      plugins:{ legend:{ display:false }, tooltip: tooltipDefaults() },
-      scales:{
-        x:{ grid:{color:gridColor()}, ticks:{color:textColor(), font:{family:'Inter',size:11}, maxTicksLimit:8}, border:{display:false} },
-        y:{ grid:{color:gridColor()}, ticks:{color:textColor(), font:{family:'Inter',size:11}, callback:v=>v>=1000?(v/1000).toFixed(1)+'k':v}, border:{display:false} }
-      }
-    }
-  });
-}
-
-// ── Donut — Traffic Sources ───────────────────────────────
-let sourceChart;
-function buildSourceChart() {
-  const ctx = document.getElementById('sourceChart');
-  if(!ctx) return;
-  setCanvasFixedSize(ctx, 360, 200, 300, 160);
-  if(sourceChart) sourceChart.destroy();
-
-  const sources = boardStats.sourceCounts || {};
-  let labels = [];
-  let data = [];
-
-  if (Object.keys(sources).length) {
-    const sorted = Object.entries(sources).sort((a, b) => b[1] - a[1]).slice(0, 8);
-    labels = sorted.map(([source]) => source);
-    data = sorted.map(([, count]) => count);
-  } else {
-    labels = ['Organic','Direct','Paid','Social','Other'];
-    data = [43,22,18,10,7];
+  if (payload.errors?.length) {
+    throw new Error(payload.errors.map((entry) => entry.message).join("; "));
   }
 
-  const colors = labels.map((label, idx) => {
-    if (idx === 0) return primaryColor();
-    if (idx === 1) return blueColor();
-    if (idx === 2) return orangeColor();
-    if (idx === 3) return purpleColor();
-    return isDark() ? '#4a4948' : '#bab9b4';
-  });
-
-  sourceChart = new Chart(ctx, {
-    type:'doughnut',
-    data:{ labels, datasets:[{ data, backgroundColor:colors, borderWidth:0, hoverOffset:6 }]},
-    options:{ responsive:false, maintainAspectRatio:false, resizeDelay:100, cutout:'68%', plugins:{ legend:{display:false}, tooltip:{ ...tooltipDefaults(), callbacks:{ label:c=>` ${c.label}: ${c.parsed}` } } } }
-  });
+  return payload.data;
 }
 
-// ── SEO Charts ────────────────────────────────────────────
-let seoChart, seoDonut;
-function buildSeoCharts() {
-  const statusCounts = boardStats.statusCounts || {};
-  const statusLabels = Object.keys(statusCounts).length ? Object.keys(statusCounts) : ['New','Answered','Completed','Closed'];
-  const statusValues = Object.keys(statusCounts).length ? Object.values(statusCounts) : [12,9,7,4];
+async function fetchBoardData() {
+  if (!state.config.apiToken) {
+    throw new Error("No monday API token configured.");
+  }
 
-  const ctx = document.getElementById('seoChart');
-  if (ctx) {
-    setCanvasFixedSize(ctx, 960, 240, 360, 200);
-    if (seoChart) seoChart.destroy();
-    seoChart = new Chart(ctx, {
-      type:'line',
-      data:{ labels: statusLabels, datasets:[
-        { label:'Lead status progression', data: statusValues, borderColor: blueColor(), backgroundColor: blueColor()+'18', fill:true, borderWidth:2, pointRadius:3, tension:0.3 }
-      ]},
-      options:{ responsive:false, maintainAspectRatio:false, resizeDelay:100,
-        interaction:{mode:'index',intersect:false},
-        plugins:{legend:{display:false}, tooltip:tooltipDefaults()},
-        scales:{
-          x:{grid:{color:gridColor()}, ticks:{color:textColor(),font:{family:'Inter',size:11},maxTicksLimit:8}, border:{display:false}},
-          y:{grid:{color:gridColor()}, ticks:{color:textColor(),font:{family:'Inter',size:11}}, border:{display:false}}
+  const initialQuery = `
+    query GetBoard($boardIds: [ID!]!, $limit: Int!) {
+      boards(ids: $boardIds) {
+        id
+        name
+        description
+        columns {
+          id
+          title
+          type
+        }
+        items_page(limit: $limit) {
+          cursor
+          items {
+            id
+            name
+            created_at
+            updated_at
+            column_values {
+              id
+              text
+              type
+              value
+              column {
+                title
+              }
+            }
+          }
         }
       }
-    });
-  }
+    }
+  `;
 
-  const dCtx = document.getElementById('seoDonut');
-  if (dCtx) {
-    if (seoDonut) seoDonut.destroy();
-    const sourceCounts = boardStats.sourceCounts || {};
-    const sourceLabels = Object.keys(sourceCounts).length ? Object.keys(sourceCounts) : ['Organic','Direct','Paid','Social','Other'];
-    const sourceValues = Object.keys(sourceCounts).length ? Object.values(sourceCounts) : [43,22,18,10,7];
-
-    seoDonut = new Chart(dCtx, {
-      type:'doughnut',
-      data:{ labels: sourceLabels, datasets:[{ data: sourceValues,
-        backgroundColor: sourceLabels.map((_, idx) => idx===0?primaryColor():idx===1?blueColor():idx===2?orangeColor():idx===3?purpleColor():(isDark()?'#4a4948':'#bab9b4')),
-        borderWidth:0, hoverOffset:6 }]},
-      options:{ responsive:false, maintainAspectRatio:false, resizeDelay:100, cutout:'68%',
-        plugins:{legend:{display:false}, tooltip:{...tooltipDefaults(), callbacks:{label:c=>` ${c.label}: ${c.parsed}`}}}
+  const nextPageQuery = `
+    query GetNextItems($cursor: String!, $limit: Int!) {
+      next_items_page(cursor: $cursor, limit: $limit) {
+        cursor
+        items {
+          id
+          name
+          created_at
+          updated_at
+          column_values {
+            id
+            text
+            type
+            value
+            column {
+              title
+            }
+          }
+        }
       }
-    });
+    }
+  `;
+
+  const initialData = await mondayRequest(initialQuery, {
+    boardIds: [state.config.boardId],
+    limit: 500,
+  });
+
+  const board = initialData.boards?.[0];
+  if (!board) throw new Error(`Board ${state.config.boardId} was not returned by the API.`);
+
+  let items = [...(board.items_page?.items || [])];
+  let cursor = board.items_page?.cursor || null;
+
+  while (cursor) {
+    const page = await mondayRequest(nextPageQuery, { cursor, limit: 500 });
+    const nextPage = page.next_items_page;
+    items = items.concat(nextPage?.items || []);
+    cursor = nextPage?.cursor || null;
   }
+
+  return {
+    id: board.id,
+    name: board.name,
+    description: board.description || "",
+    columns: board.columns || [],
+    items,
+  };
 }
 
-// ── Traffic Breakdown Charts ──────────────────────────────
-let trafficBreakdownChart, deviceChart;
-function buildTrafficCharts() {
-  const ctx = document.getElementById('trafficBreakdownChart');
-  if(ctx) {
-    setCanvasFixedSize(ctx, 960, 240, 360, 200);
-    if(trafficBreakdownChart) trafficBreakdownChart.destroy();
+function buildMetrics(leads) {
+  const sourceCounts = {};
+  const statusCounts = {};
+  const timelineCounts = {};
+  const recentLeads = [...leads].sort((a, b) => b.leadDate - a.leadDate).slice(0, 8);
+  const now = new Date();
+  const weekAgo = new Date(now);
+  weekAgo.setDate(now.getDate() - 6);
 
-    const sources = boardStats.sourceCounts || {};
-    let labels = [];
-    let data = [];
-    if (Object.keys(sources).length) {
-      const sorted = Object.entries(sources).sort((a,b)=>b[1]-a[1]).slice(0,5);
-      labels = sorted.map(([s]) => s);
-      data = sorted.map(([,c]) => c);
+  let answered = 0;
+  let completed = 0;
+  let newCallerYes = 0;
+  let thisWeek = 0;
+
+  leads.forEach((lead) => {
+    sourceCounts[lead.source] = (sourceCounts[lead.source] || 0) + 1;
+    statusCounts[lead.status] = (statusCounts[lead.status] || 0) + 1;
+
+    const dayKey = lead.leadDate instanceof Date && !Number.isNaN(lead.leadDate.getTime())
+      ? lead.leadDate.toISOString().slice(0, 10)
+      : "Unknown";
+    timelineCounts[dayKey] = (timelineCounts[dayKey] || 0) + 1;
+
+    const statusNormalized = normalize(lead.status);
+    if (/answered|open|contacted|working/.test(statusNormalized)) answered += 1;
+    if (/completed|closed|won|converted/.test(statusNormalized)) completed += 1;
+    if (lead.newCaller === "yes") newCallerYes += 1;
+    if (lead.leadDate instanceof Date && !Number.isNaN(lead.leadDate.getTime()) && lead.leadDate >= weekAgo) {
+      thisWeek += 1;
+    }
+  });
+
+  const topSourceEntry = Object.entries(sourceCounts).sort((a, b) => b[1] - a[1])[0] || ["-", 0];
+
+  return {
+    total: leads.length,
+    answered,
+    completed,
+    newCallerYes,
+    thisWeek,
+    topSource: topSourceEntry[0],
+    topSourceCount: topSourceEntry[1],
+    sourceCounts,
+    statusCounts,
+    timelineCounts,
+    recentLeads,
+  };
+}
+function animateMetric(id, targetValue, format = (value) => formatNumber(value)) {
+  const element = document.getElementById(id);
+  if (!element) return;
+
+  const numericTarget = Number(targetValue);
+  if (!Number.isFinite(numericTarget)) {
+    element.textContent = String(targetValue);
+    return;
+  }
+
+  const start = Number(element.dataset.currentValue || 0);
+  const startTime = performance.now();
+  const duration = 700;
+
+  function tick(now) {
+    const progress = Math.min((now - startTime) / duration, 1);
+    const eased = 1 - Math.pow(1 - progress, 3);
+    const value = start + (numericTarget - start) * eased;
+    element.textContent = format(value);
+    if (progress < 1) {
+      requestAnimationFrame(tick);
     } else {
-      labels = ['Organic','Direct','Paid','Social','Other'];
-      data = [43,22,18,10,7];
+      element.dataset.currentValue = String(numericTarget);
+      element.textContent = format(numericTarget);
     }
-
-    trafficBreakdownChart = new Chart(ctx, {
-      type:'bar',
-      data:{ labels, datasets:[{ label:'Lead source', data, backgroundColor: labels.map((_, idx) => idx===0?primaryColor():idx===1?blueColor():idx===2?orangeColor():idx===3?purpleColor():(isDark()?'#4a4948':'#bab9b4')), borderRadius:2, borderSkipped:false }]},
-      options:{ responsive:false, maintainAspectRatio:false, resizeDelay:100,
-        interaction:{mode:'index',intersect:false},
-        plugins:{ legend:{display:false}, tooltip:tooltipDefaults() },
-        scales:{
-          x:{ grid:{display:false}, ticks:{color:textColor(),font:{family:'Inter',size:11},maxTicksLimit:8}, border:{display:false} },
-          y:{ grid:{color:gridColor()}, ticks:{color:textColor(),font:{family:'Inter',size:11},callback:v=>v>=1000?(v/1000).toFixed(1)+'k':v}, border:{display:false} }
-        }
-      }
-    });
   }
 
-  const dCtx = document.getElementById('deviceChart');
-  if(dCtx) {
-    setCanvasFixedSize(dCtx, 360, 200, 300, 160);
-    if(deviceChart) deviceChart.destroy();
-
-    const newCaller = boardStats.newCallerCounts || {yes:0,no:0,unknown:0};
-    deviceChart = new Chart(dCtx, {
-      type:'doughnut',
-      data:{ labels:['New Caller','Not New','Unknown'], datasets:[{ data:[newCaller.yes,newCaller.no,newCaller.unknown], backgroundColor:[primaryColor(),blueColor(),orangeColor()], borderWidth:0, hoverOffset:6 }]},
-      options:{ responsive:false, maintainAspectRatio:false, resizeDelay:100, cutout:'68%', plugins:{legend:{display:false}, tooltip:{...tooltipDefaults(), callbacks:{label:c=>` ${c.label}: ${c.parsed}`}}} }
-    });
-  }
+  requestAnimationFrame(tick);
 }
 
-// ── Conversion Charts ─────────────────────────────────────
-let convChart, convDonut;
-function buildConvCharts() {
-  const ctx = document.getElementById('convChart');
-  if (ctx) {
-    setCanvasFixedSize(ctx, 960, 240, 360, 200);
-    if (convChart) convChart.destroy();
+function renderMetrics() {
+  const metrics = state.metrics;
+  if (!metrics) return;
 
-    const statusCounts = boardStats.statusCounts || {};
-    const labels = Object.keys(statusCounts).length ? Object.keys(statusCounts) : ['New','Answered','Completed','Closed'];
-    const values = Object.keys(statusCounts).length ? Object.values(statusCounts) : [12,8,5,3];
+  animateMetric("metricTotalValue", metrics.total);
+  animateMetric("metricAnsweredValue", metrics.answered);
+  animateMetric("metricCompletedValue", metrics.completed);
+  animateMetric("metricNewCallerValue", metrics.newCallerYes);
+  animateMetric("metricWeekValue", metrics.thisWeek);
 
-    convChart = new Chart(ctx, {
-      type:'bar',
-      data:{ labels, datasets:[{ label:'Status count', data:values, backgroundColor: labels.map((_, idx)=> idx===0?primaryColor():idx===1?blueColor():idx===2?purpleColor():orangeColor()), borderRadius:2, borderSkipped:false }]},
-      options:{ responsive:false, maintainAspectRatio:false, resizeDelay:100,
-        interaction:{mode:'index',intersect:false},
-        plugins:{ legend:{display:false}, tooltip:tooltipDefaults() },
-        scales:{ x:{ stacked:true, grid:{display:false}, ticks:{color:textColor(),font:{family:'Inter',size:11},maxTicksLimit:8}, border:{display:false} }, y:{ stacked:true, grid:{color:gridColor()}, ticks:{color:textColor(),font:{family:'Inter',size:11}}, border:{display:false} } }
-      }
-    });
-  }
+  const topSourceValue = document.getElementById("metricTopSourceValue");
+  if (topSourceValue) topSourceValue.textContent = metrics.topSource;
 
-  const dCtx = document.getElementById('convDonut');
-  if (dCtx) {
-    setCanvasFixedSize(dCtx, 360, 200, 300, 160);
-    if (convDonut) convDonut.destroy();
-
-    const total = boardStats.totalLeads || 0;
-    const closed = boardStats.closedLeads || 0;
-    const open = boardStats.openLeads || 0;
-    const pending = Math.max(0, total - closed - open);
-
-    convDonut = new Chart(dCtx, {
-      type:'doughnut',
-      data:{ labels:['Closed','Open','Pending'], datasets:[{ data:[closed, open, pending], backgroundColor:[successColor(),blueColor(),orangeColor()], borderWidth:0, hoverOffset:6 }]},
-      options:{ responsive:false, maintainAspectRatio:false, resizeDelay:100, cutout:'68%', plugins:{legend:{display:false}, tooltip:{...tooltipDefaults(), callbacks:{label:c=>` ${c.label}: ${c.parsed}`}}} }
-    });
-  }
+  document.getElementById("metricTotalNote").textContent = `${formatNumber(metrics.total)} rows pulled from monday`;
+  document.getElementById("metricAnsweredNote").textContent = `${formatNumber(metrics.answered)} leads in answered/open-style statuses`;
+  document.getElementById("metricCompletedNote").textContent = `${formatNumber(metrics.completed)} leads in completed/closed-style statuses`;
+  document.getElementById("metricNewCallerNote").textContent = `${formatNumber(metrics.newCallerYes)} rows marked as new callers`;
+  document.getElementById("metricTopSourceNote").textContent = `${formatNumber(metrics.topSourceCount)} leads from the top source`;
+  document.getElementById("metricWeekNote").textContent = `${formatNumber(metrics.thisWeek)} leads dated within the last 7 days`;
 }
 
-// ── Page-specific init ────────────────────────────────────
-const initializedPages = new Set();
-function initPageCharts(page) {
-  // Don't re-init sparklines/counters on overview if already done
-  const scope = document.getElementById(PAGE_MAP[page]);
-  if(!scope) return;
-  // Always animate counters on the visible page
-  animateCounters(scope);
-  if(page === 'overview' && !initializedPages.has('overview')) {
-    buildTrafficChart();
-    buildSourceChart();
-    buildSparklines('overview');
-    initializedPages.add('overview');
-  } else if(page === 'seo' && !initializedPages.has('seo')) {
-    buildSeoCharts();
-    buildSparklines('seo');
-    buildSeoTable();
-    buildSeoOpportunities();
-    initializedPages.add('seo');
-  } else if(page === 'traffic' && !initializedPages.has('traffic')) {
-    buildTrafficCharts();
-    buildSparklines('traffic');
-    buildTrafficTable();
-    buildCitiesList();
-    initializedPages.add('traffic');
-  } else if(page === 'conversions' && !initializedPages.has('conversions')) {
-    buildConvCharts();
-    buildSparklines('conversions');
-    buildConvTable();
-    buildGoalsList();
-    initializedPages.add('conversions');
-  }
+function destroyCharts() {
+  Object.values(state.charts).forEach((chart) => chart?.destroy?.());
+  state.charts = {};
 }
 
-function buildSparklines(page) {
-  const p = primaryColor(), s = successColor(), w = errorColor(), e = errorColor(), b = blueColor();
-  if(page === 'overview') {
-    makeSparkline('spark1','up',p); makeSparkline('spark2','up',s);
-    makeSparkline('spark3','up',s); makeSparkline('spark4','up',w);
-    makeSparkline('spark5','down',e); makeSparkline('spark6','flat',p);
-  } else if(page === 'seo') {
-    makeSparkline('seoSpark1','up',p); makeSparkline('seoSpark2','up',b);
-    makeSparkline('seoSpark3','up',s); makeSparkline('seoSpark4','up',w);
-    makeSparkline('seoSpark5','up',p); makeSparkline('seoSpark6','up',s);
-  } else if(page === 'traffic') {
-    makeSparkline('trfSpark1','up',p); makeSparkline('trfSpark2','up',s);
-    makeSparkline('trfSpark3','up',b); makeSparkline('trfSpark4','up',p);
-    makeSparkline('trfSpark5','down',e); makeSparkline('trfSpark6','up',s);
-  } else if(page === 'conversions') {
-    makeSparkline('cvSpark1','up',p); makeSparkline('cvSpark2','up',s);
-    makeSparkline('cvSpark3','up',s); makeSparkline('cvSpark4','up',b);
-    makeSparkline('cvSpark5','up',p); makeSparkline('cvSpark6','up',s);
-  }
+function chartOptions(options) {
+  return {
+    ...options,
+    color: cssVar("--text-muted"),
+    plugins: {
+      tooltip: {
+        backgroundColor: cssVar("--panel-strong"),
+        titleColor: cssVar("--text"),
+        bodyColor: cssVar("--text-muted"),
+        borderColor: cssVar("--panel-border"),
+        borderWidth: 1,
+        padding: 12,
+      },
+      ...(options.plugins || {}),
+    },
+  };
 }
 
-// ── Table & List Builders ─────────────────────────────────
-let topPages = [];
-let keywordData = [];
-
-function buildPagesTable() {
-  const tbody = document.getElementById('pagesTableBody');
-  if(!tbody) return;
-
-  if(!topPages.length) {
-    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--color-text-muted);">No leads found. Ensure Monday API token is valid and board access is granted.</td></tr>`;
-    return;
-  }
-
-  const isLeadReport = topPages[0].source !== undefined;
-  if(isLeadReport) {
-    tbody.innerHTML = topPages.map(p => `
-      <tr>
-        <td><span class="page-url">${p.url}</span></td>
-        <td>${p.source}</td>
-        <td>${p.status}</td>
-        <td>${p.owner}</td>
-        <td>${p.created}</td>
-        <td>${p.landingPage || '—'}</td>
-        <td>${p.postalCode || '—'}</td>
-        <td>${p.phone}</td>
-      </tr>
-    `).join('');
-    return;
-  }
-
-  tbody.innerHTML = topPages.map(p => `
-    <tr><td><span class="page-url">${p.url}</span></td>
-    <td class="num">${p.clicks.toLocaleString()}</td>
-    <td class="num">${p.impressions.toLocaleString()}</td>
-    <td class="num">${p.ctr}</td><td class="num">${p.pos}</td>
-    <td><span class="trend-${p.trend}">${p.trend==='up'?'↑':p.trend==='down'?'↓':'—'} ${p.delta}</span></td></tr>
-  `).join('');
+function axisOptions(extra = {}) {
+  return {
+    grid: {
+      color: cssVar("--panel-border"),
+    },
+    ticks: {
+      color: cssVar("--text-muted"),
+      font: {
+        family: "Manrope",
+        size: 11,
+      },
+      ...(extra.ticks || {}),
+    },
+    border: {
+      display: false,
+    },
+    ...extra,
+  };
 }
 
-function buildKeywordList() {
-  const list = document.getElementById('keywordList');
-  if(!list) return;
-  if(!keywordData.length) {
-    list.innerHTML = '<div class="keyword-item" style="color:var(--color-text-muted);">No keyword/lead summary data available from Monday board.</div>';
-    return;
-  }
-  list.innerHTML = keywordData.map(k => {
-    const n = parseInt(k.change);
-    const cls = n>0?'trend-up':n<0?'trend-down':'trend-flat';
-    const arrow = n>0?'↑':n<0?'↓':'—';
-    return `<div class="keyword-item">
-      <div class="kw-pos">${k.pos}</div>
-      <div class="kw-info"><div class="kw-term">${k.term}</div><div class="kw-meta">${k.volume} vol/mo</div></div>
-      <div class="kw-change ${cls}">${arrow}${Math.abs(n)||''}</div></div>`;
-  }).join('');
-}
+function buildTimelineChart() {
+  const ctx = document.getElementById("leadsTimelineChart");
+  if (!ctx) return;
 
-function buildSeoTable() {
-  const tbody = document.getElementById('seoTableBody');
-  if(!tbody) return;
+  const entries = Object.entries(state.metrics.timelineCounts)
+    .filter(([key]) => key !== "Unknown")
+    .sort((a, b) => a[0].localeCompare(b[0]));
 
-  const sources = boardStats.sourceCounts || {};
-  if (!Object.keys(sources).length) {
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--color-text-muted);">No lead source data available.</td></tr>';
-    return;
-  }
+  const labels = entries.length
+    ? entries.map(([date]) =>
+        new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(new Date(date)),
+      )
+    : ["No dated leads"];
+  const values = entries.length ? entries.map(([, count]) => count) : [0];
 
-  const rows = Object.entries(sources).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([source,count], idx)=>({
-    kw: source,
-    pos: idx+1,
-    clicks: count,
-    impr: Math.round(count * 15),
-    ctr: `${Math.min(100,Math.round(Math.random()*5+15))}%`,
-    change: `${Math.round(Math.random()*10-5)}%`
-  }));
-
-  tbody.innerHTML = rows.map(r => {
-    const n = parseInt(r.change);
-    const cls = n>0?'trend-up':n<0?'trend-down':'trend-flat';
-    return `<tr><td>${r.kw}</td><td class="num">${r.pos}</td><td class="num">${r.clicks.toLocaleString()}</td><td class="num">${r.impr.toLocaleString()}</td><td class="num">${r.ctr}</td><td><span class="${cls}">${n>0?'↑':n<0?'↓':'—'} ${r.change}</span></td></tr>`;
-  }).join('');
-}
-
-function buildSeoOpportunities() {
-  const list = document.getElementById('seoOpportunities');
-  if(!list) return;
-  const opps = [
-    { term:'miami sports rehab clinic', pos:5,  volume:'1,100', change:'+3' },
-    { term:'pediatric speech therapy',  pos:8,  volume:'880',   change:'+2' },
-    { term:'telehealth pt near me',     pos:12, volume:'720',   change:'+4' },
-    { term:'physical therapy miami',    pos:14, volume:'3,400', change:'+6' },
-    { term:'occupational therapist fl', pos:17, volume:'540',   change:'+1' },
-  ];
-  list.innerHTML = opps.map(k => {
-    const n = parseInt(k.change);
-    return `<div class="keyword-item">
-      <div class="kw-pos" style="background:var(--color-orange);">${k.pos}</div>
-      <div class="kw-info"><div class="kw-term">${k.term}</div><div class="kw-meta">${k.volume} vol/mo</div></div>
-      <div class="kw-change trend-up">↑${n}</div></div>`;
-  }).join('');
-}
-
-function buildTrafficTable() {
-  const tbody = document.getElementById('trafficTableBody');
-  if(!tbody) return;
-
-  if(!topPages.length) {
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--color-text-muted);">No lead row data available.</td></tr>';
-    return;
-  }
-
-  const rows = topPages.slice(0, 5).map(item => ({
-    url: item.landingPage || item.url || '—',
-    sessions: Number(item.source || 0),
-    newUsers: Number(item.postalCode || 0),
-    bounce: item.status || '—',
-    time: item.created || '—',
-    trend: item.status && /closed|completed/i.test(item.status) ? 'down' : 'up'
-  }));
-
-  tbody.innerHTML = rows.map(r => `<tr>
-    <td><span class="page-url">${r.url}</span></td>
-    <td class="num">${isNaN(r.sessions) ? '—' : r.sessions.toLocaleString()}</td>
-    <td class="num">${isNaN(r.newUsers) ? '—' : r.newUsers.toLocaleString()}</td>
-    <td class="num">${r.bounce}</td>
-    <td class="num">${r.time}</td>
-    <td><span class="trend-${r.trend}">${r.trend==='up'?'↑':r.trend==='down'?'↓':'—'}</span></td>
-  </tr>`).join('');
-}
-
-function buildCitiesList() {
-  const list = document.getElementById('citiesList');
-  if(!list) return;
-
-  const cps = boardStats.sourceCounts || {};
-  const sourceRows = Object.entries(cps).sort((a,b)=>b[1]-a[1]).slice(0,7);
-  if (!sourceRows.length) {
-    list.innerHTML = '<div class="keyword-item" style="color:var(--color-text-muted);">No source breakdown available.</div>';
-    return;
-  }
-
-  const total = sourceRows.reduce((sum, [,cnt]) => sum + cnt, 0);
-  list.innerHTML = sourceRows.map(([source,count]) => {
-    const pct = total ? ((count/total)*100).toFixed(1) + '%' : '0%';
-    return `<div class="keyword-item">
-      <div class="kw-info"><div class="kw-term">${source}</div><div class="kw-meta">${count.toLocaleString()} leads</div></div>
-      <div class="kw-change" style="color:var(--color-text-muted)">${pct}</div>
-    </div>`;
-  }).join('');
-}
-
-function buildConvTable() {
-  const tbody = document.getElementById('convTableBody');
-  if(!tbody) return;
-
-  const statuses = boardStats.statusCounts || {};
-  const sorted = Object.entries(statuses).sort((a,b)=>b[1]-a[1]).slice(0,5);
-  if (!sorted.length) {
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--color-text-muted);">No conversion status data available.</td></tr>';
-    return;
-  }
-
-  tbody.innerHTML = sorted.map(([status,count]) => {
-    const totalLeads = boardStats.totalLeads || 0;
-    const rate = totalLeads ? ((count/totalLeads)*100).toFixed(2)+'%' : '0%';
-    return `<tr>
-      <td><span class="page-url">${status}</span></td>
-      <td class="num">${count.toLocaleString()}</td>
-      <td class="num">${rate}</td>
-      <td class="num">${(count*5).toLocaleString()}</td>
-      <td class="num">${(count*2.5).toFixed(2)}</td>
-      <td><span class="trend-${/closed|won/i.test(status)?'down':'up'}">${/closed|won/i.test(status)?'↓':'↑'}</span></td>
-    </tr>`;
-  }).join('');
-}
-
-function buildGoalsList() {
-  const list = document.getElementById('goalsList');
-  if(!list) return;
-  const goals = [
-    { name:'Contact Form Submit', count:743,  change:'+11%' },
-    { name:'Phone Call Click',    count:312,  change:'+3%'  },
-    { name:'Live Chat Open',      count:193,  change:'+18%' },
-    { name:'Appointment Book',    count:156,  change:'+22%' },
-    { name:'Directions Click',    count:98,   change:'+5%'  },
-    { name:'Email Click',         count:74,   change:'+8%'  },
-  ];
-  list.innerHTML = goals.map(g => `<div class="keyword-item">
-    <div class="kw-info"><div class="kw-term">${g.name}</div><div class="kw-meta">${g.count.toLocaleString()} completions</div></div>
-    <div class="kw-change trend-up">↑ ${g.change}</div>
-  </div>`).join('');
-}
-
-// ── Theme-aware full rebuild ──────────────────────────────
-function updateChartTheme() {
-  initializedPages.forEach(page => {
-    if(page === 'overview') { buildTrafficChart(); buildSourceChart(); buildSparklines('overview'); }
-    if(page === 'seo')         { buildSeoCharts(); buildSparklines('seo'); }
-    if(page === 'traffic')     { buildTrafficCharts(); buildSparklines('traffic'); }
-    if(page === 'conversions') { buildConvCharts(); buildSparklines('conversions'); }
+  state.charts.timeline = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels,
+      datasets: [
+        {
+          label: "Leads",
+          data: values,
+          borderColor: cssVar("--primary"),
+          backgroundColor: "rgba(11, 111, 97, 0.12)",
+          fill: true,
+          tension: 0.28,
+          borderWidth: 3,
+          pointRadius: 3,
+          pointHoverRadius: 5,
+        },
+      ],
+    },
+    options: chartOptions({
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: axisOptions(),
+        y: axisOptions({ beginAtZero: true, ticks: { precision: 0 } }),
+      },
+      plugins: {
+        legend: { display: false },
+      },
+    }),
   });
 }
 
-// ── Lucide Icons ──────────────────────────────────────────
-lucide.createIcons();
+function buildSourceChart() {
+  const ctx = document.getElementById("sourceChart");
+  const legend = document.getElementById("sourceLegend");
+  if (!ctx || !legend) return;
 
-// ── Init ──────────────────────────────────────────────────
-async function loadMondayDashboard() {
-  const board = await fetchMondayData();
-  console.log('Monday board data', board);
-  if (board) {
-    buildMondayMappedData(board);
-  }
-  buildPagesTable();
-  buildKeywordList();
-  initPageCharts('overview');
+  const sourceEntries = Object.entries(state.metrics.sourceCounts).sort((a, b) => b[1] - a[1]);
+  const labels = sourceEntries.length ? sourceEntries.map(([label]) => label) : ["No source data"];
+  const values = sourceEntries.length ? sourceEntries.map(([, value]) => value) : [1];
+  const palette = [cssVar("--primary"), "#3279a8", "#d18827", "#7d5ce6", "#d46b82", "#556d63"];
+
+  state.charts.source = new Chart(ctx, {
+    type: "doughnut",
+    data: {
+      labels,
+      datasets: [
+        {
+          data: values,
+          backgroundColor: labels.map((_, index) => palette[index % palette.length]),
+          borderWidth: 0,
+        },
+      ],
+    },
+    options: chartOptions({
+      responsive: true,
+      maintainAspectRatio: false,
+      cutout: "68%",
+      plugins: {
+        legend: { display: false },
+      },
+    }),
+  });
+
+  const total = values.reduce((sum, current) => sum + current, 0) || 1;
+  legend.innerHTML = sourceEntries.length
+    ? sourceEntries
+        .map(([label, count], index) => {
+          const percent = ((count / total) * 100).toFixed(1);
+          return `
+            <div class="legend-row">
+              <div class="legend-label">
+                <span class="legend-dot" style="background:${palette[index % palette.length]}"></span>
+                <span>${escapeHtml(label)}</span>
+              </div>
+              <strong>${escapeHtml(percent)}%</strong>
+            </div>
+          `;
+        })
+        .join("")
+    : '<div class="empty-state">No lead source values were detected on the board.</div>';
 }
 
-loadMondayDashboard();
+function buildStatusChart() {
+  const ctx = document.getElementById("statusChart");
+  if (!ctx) return;
+
+  const statusEntries = Object.entries(state.metrics.statusCounts).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  const labels = statusEntries.length ? statusEntries.map(([label]) => label) : ["No status data"];
+  const values = statusEntries.length ? statusEntries.map(([, value]) => value) : [0];
+
+  state.charts.status = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [
+        {
+          data: values,
+          backgroundColor: labels.map((label) => {
+            const tone = getStatusTone(label);
+            if (tone === "success") return cssVar("--success");
+            if (tone === "warning") return cssVar("--warning");
+            if (tone === "danger") return cssVar("--danger");
+            return cssVar("--primary");
+          }),
+          borderRadius: 12,
+          borderSkipped: false,
+        },
+      ],
+    },
+    options: chartOptions({
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: axisOptions(),
+        y: axisOptions({ beginAtZero: true, ticks: { precision: 0 } }),
+      },
+      plugins: {
+        legend: { display: false },
+      },
+    }),
+  });
+}
+
+function renderSummaryLists() {
+  const sourceRoot = document.getElementById("sourceBreakdownList");
+  const recentRoot = document.getElementById("recentLeadsList");
+  if (!sourceRoot || !recentRoot) return;
+
+  const sourceEntries = Object.entries(state.metrics.sourceCounts).sort((a, b) => b[1] - a[1]);
+  const sourceTotal = sourceEntries.reduce((sum, [, count]) => sum + count, 0) || 1;
+
+  sourceRoot.innerHTML = sourceEntries.length
+    ? sourceEntries
+        .map(([source, count]) => {
+          const percent = ((count / sourceTotal) * 100).toFixed(1);
+          return `
+            <div class="stack-item">
+              <div class="stack-copy">
+                <p class="stack-title">${escapeHtml(source)}</p>
+                <p class="stack-meta">${escapeHtml(percent)}% of loaded leads</p>
+              </div>
+              <span class="pill pill-primary">${escapeHtml(formatNumber(count))}</span>
+            </div>
+          `;
+        })
+        .join("")
+    : '<div class="empty-state">No source values found.</div>';
+
+  recentRoot.innerHTML = state.metrics.recentLeads.length
+    ? state.metrics.recentLeads
+        .map((lead) => `
+          <div class="stack-item">
+            <div class="stack-copy">
+              <p class="stack-title">${escapeHtml(lead.displayName)}</p>
+              <p class="stack-meta">${escapeHtml(lead.status)} � ${escapeHtml(lead.source)}</p>
+            </div>
+            <span class="pill pill-warning">${escapeHtml(formatDate(lead.leadDate))}</span>
+          </div>
+        `)
+        .join("")
+    : '<div class="empty-state">No recent leads available.</div>';
+}
+
+function renderBoardMeta() {
+  const boardName = state.board?.name || "PHL Consolidated Leads";
+  const rowCount = state.leads.length;
+
+  document.getElementById("boardNameSidebar").textContent = boardName;
+  document.getElementById("sidebarBoardMeta").textContent = `${formatNumber(rowCount)} loaded row${rowCount === 1 ? "" : "s"}`;
+  document.getElementById("boardIdLabel").textContent = state.config.boardId;
+  document.getElementById("rowCountLabel").textContent = formatNumber(rowCount);
+  document.getElementById("boardLink").href = state.config.boardUrl;
+}
+
+function populateFilterOptions() {
+  const sourceFilter = document.getElementById("sourceFilter");
+  const statusFilter = document.getElementById("statusFilter");
+  if (!sourceFilter || !statusFilter) return;
+
+  const sourceOptions = Object.keys(state.metrics.sourceCounts).sort();
+  const statusOptions = Object.keys(state.metrics.statusCounts).sort();
+
+  sourceFilter.innerHTML = ['<option value="all">All sources</option>']
+    .concat(sourceOptions.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`))
+    .join("");
+
+  statusFilter.innerHTML = ['<option value="all">All statuses</option>']
+    .concat(statusOptions.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`))
+    .join("");
+}
+
+function applyFilters() {
+  const search = normalize(document.getElementById("searchInput")?.value || "");
+  const source = document.getElementById("sourceFilter")?.value || "all";
+  const status = document.getElementById("statusFilter")?.value || "all";
+  const newCaller = document.getElementById("newCallerFilter")?.value || "all";
+  const sort = document.getElementById("sortFilter")?.value || "date-desc";
+
+  let results = state.leads.filter((lead) => {
+    const matchesSearch =
+      !search ||
+      normalize(
+        `${lead.displayName} ${lead.source} ${lead.status} ${lead.contactNumber} ${lead.postalCode} ${lead.landingPage}`,
+      ).includes(search);
+
+    const matchesSource = source === "all" || lead.source === source;
+    const matchesStatus = status === "all" || lead.status === status;
+    const matchesCaller = newCaller === "all" || lead.newCaller === newCaller;
+
+    return matchesSearch && matchesSource && matchesStatus && matchesCaller;
+  });
+
+  results.sort((left, right) => {
+    if (sort === "date-asc") return left.leadDate - right.leadDate;
+    if (sort === "client-asc") return left.displayName.localeCompare(right.displayName);
+    if (sort === "source-asc") return left.source.localeCompare(right.source);
+    if (sort === "status-asc") return left.status.localeCompare(right.status);
+    return right.leadDate - left.leadDate;
+  });
+
+  state.filteredLeads = results;
+  renderTable();
+}
+
+function renderTable() {
+  const tbody = document.getElementById("leadsTableBody");
+  const summary = document.getElementById("resultsSummary");
+  if (!tbody || !summary) return;
+
+  summary.textContent = `${formatNumber(state.filteredLeads.length)} lead${state.filteredLeads.length === 1 ? "" : "s"} shown`;
+
+  if (!state.filteredLeads.length) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="8">
+          <div class="empty-state">No leads match the current filters.</div>
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  tbody.innerHTML = state.filteredLeads
+    .map((lead) => {
+      const statusTone = getStatusTone(lead.status);
+      const statusClass =
+        statusTone === "success"
+          ? "status-badge-success"
+          : statusTone === "warning"
+            ? "status-badge-warning"
+            : statusTone === "danger"
+              ? "status-badge-danger"
+              : "";
+      const callerClass =
+        lead.newCaller === "yes"
+          ? "caller-badge-yes"
+          : lead.newCaller === "no"
+            ? "caller-badge-no"
+            : "caller-badge-unknown";
+
+      const landingContent = lead.landingPage
+        ? `<a class="table-link" href="${escapeHtml(lead.landingPage)}" target="_blank" rel="noreferrer">${escapeHtml(lead.landingPage)}</a>`
+        : '<span class="table-secondary">-</span>';
+
+      return `
+        <tr>
+          <td><span class="status-badge ${statusClass}">${escapeHtml(lead.status)}</span></td>
+          <td>
+            <div class="table-primary">
+              <strong>${escapeHtml(lead.displayName)}</strong>
+              <span class="table-secondary table-mono">Item ${escapeHtml(lead.itemId)}</span>
+            </div>
+          </td>
+          <td>${escapeHtml(lead.leadDateLabel)}</td>
+          <td>${escapeHtml(lead.source)}</td>
+          <td><span class="caller-badge ${callerClass}">${escapeHtml(lead.newCallerRaw || lead.newCaller)}</span></td>
+          <td class="table-mono">${escapeHtml(lead.postalCode)}</td>
+          <td class="table-mono">${escapeHtml(lead.contactNumber)}</td>
+          <td>${landingContent}</td>
+        </tr>
+      `;
+    })
+    .join("");
+}
+
+function renderColumnMap() {
+  const root = document.getElementById("columnMap");
+  if (!root) return;
+
+  const columns = state.board?.columns || [];
+  if (!columns.length) {
+    root.innerHTML = '<div class="empty-state">No columns loaded yet.</div>';
+    return;
+  }
+
+  root.innerHTML = columns
+    .map(
+      (column) => `
+        <div class="column-pill">
+          <p class="column-title">${escapeHtml(column.title)}</p>
+          <p class="column-type">${escapeHtml(column.id)} � ${escapeHtml(column.type)}</p>
+        </div>
+      `,
+    )
+    .join("");
+}
+
+function renderSettingsForm() {
+  const boardInput = document.getElementById("boardIdInput");
+  const tokenInput = document.getElementById("apiTokenInput");
+  if (boardInput) boardInput.value = state.config.boardId;
+  if (tokenInput) tokenInput.value = state.config.apiToken;
+}
+
+function downloadCsv() {
+  if (!state.filteredLeads.length) {
+    logEvent("Export skipped because there are no filtered leads to export.", "warning");
+    return;
+  }
+
+  const rows = [
+    ["Status", "Client Name", "Date of Lead", "Source", "New Caller", "Postal Code", "Contact Number", "Landing Page URL"],
+    ...state.filteredLeads.map((lead) => [
+      lead.status,
+      lead.displayName,
+      lead.leadDateLabel,
+      lead.source,
+      lead.newCallerRaw || lead.newCaller,
+      lead.postalCode,
+      lead.contactNumber,
+      lead.landingPage,
+    ]),
+  ];
+
+  const csv = rows
+    .map((row) => row.map((value) => `"${String(value ?? "").replace(/"/g, '""')}"`).join(","))
+    .join("\n");
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `phl-consolidated-leads-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+  logEvent(`Exported ${state.filteredLeads.length} filtered leads to CSV.`, "success");
+}
+
+function renderDashboard() {
+  renderBoardMeta();
+  renderMetrics();
+  populateFilterOptions();
+  applyFilters();
+  renderSummaryLists();
+  renderColumnMap();
+  destroyCharts();
+  buildTimelineChart();
+  buildSourceChart();
+  buildStatusChart();
+}
+
+async function loadDashboard() {
+  try {
+    setSyncState("loading", `Connecting to monday board ${state.config.boardId}...`);
+    logEvent(`Fetching monday board ${state.config.boardId}.`, "info");
+
+    state.board = await fetchBoardData();
+    state.leads = (state.board.items || []).map(parseLead);
+    state.metrics = buildMetrics(state.leads);
+
+    renderDashboard();
+    renderSettingsForm();
+
+    const syncTime = new Date();
+    document.getElementById("lastUpdatedLabel").textContent = formatDateTime(syncTime);
+    setSyncState("success", `Loaded ${formatNumber(state.leads.length)} leads from "${state.board.name}".`);
+    logEvent(`Loaded ${state.leads.length} board rows from ${state.board.name}.`, "success");
+  } catch (error) {
+    setSyncState("error", error.message);
+    logEvent(error.message, "error");
+  }
+}
+function bindEvents() {
+  document.querySelector("[data-theme-toggle]")?.addEventListener("click", () => {
+    const root = document.documentElement;
+    const nextTheme = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    root.setAttribute("data-theme", nextTheme);
+    updateThemeButton();
+    if (state.metrics) {
+      destroyCharts();
+      buildTimelineChart();
+      buildSourceChart();
+      buildStatusChart();
+    }
+  });
+
+  document.getElementById("refreshBtn")?.addEventListener("click", () => {
+    loadDashboard();
+  });
+
+  document.getElementById("exportBtn")?.addEventListener("click", downloadCsv);
+  document.getElementById("searchInput")?.addEventListener("input", applyFilters);
+  document.getElementById("sourceFilter")?.addEventListener("change", applyFilters);
+  document.getElementById("statusFilter")?.addEventListener("change", applyFilters);
+  document.getElementById("newCallerFilter")?.addEventListener("change", applyFilters);
+  document.getElementById("sortFilter")?.addEventListener("change", applyFilters);
+
+  document.getElementById("resetFiltersBtn")?.addEventListener("click", () => {
+    document.getElementById("searchInput").value = "";
+    document.getElementById("sourceFilter").value = "all";
+    document.getElementById("statusFilter").value = "all";
+    document.getElementById("newCallerFilter").value = "all";
+    document.getElementById("sortFilter").value = "date-desc";
+    applyFilters();
+  });
+
+  document.getElementById("saveConfigBtn")?.addEventListener("click", () => {
+    const boardId = document.getElementById("boardIdInput")?.value.trim();
+    const apiToken = document.getElementById("apiTokenInput")?.value.trim();
+
+    if (!boardId || !apiToken) {
+      logEvent("Board ID and API token are both required before saving a local override.", "warning");
+      return;
+    }
+
+    state.config = {
+      ...state.config,
+      boardId,
+      boardUrl: `https://rptclinic.monday.com/boards/${boardId}`,
+      apiToken,
+    };
+    saveConfig(state.config);
+    renderSettingsForm();
+    logEvent(`Saved local override for board ${boardId}.`, "success");
+    loadDashboard();
+  });
+
+  document.getElementById("clearConfigBtn")?.addEventListener("click", () => {
+    clearConfig();
+    renderSettingsForm();
+    logEvent("Cleared local config override and restored defaults from code.", "warning");
+    loadDashboard();
+  });
+
+  const sidebar = document.getElementById("sidebar");
+  const overlay = document.getElementById("overlay");
+
+  document.getElementById("mobileMenuBtn")?.addEventListener("click", () => {
+    sidebar?.classList.add("mobile-open");
+    overlay?.classList.add("active");
+  });
+
+  overlay?.addEventListener("click", () => {
+    sidebar?.classList.remove("mobile-open");
+    overlay?.classList.remove("active");
+  });
+
+  document.querySelectorAll(".nav-link").forEach((link) => {
+    link.addEventListener("click", () => {
+      sidebar?.classList.remove("mobile-open");
+      overlay?.classList.remove("active");
+    });
+  });
+
+  const observer = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return;
+        const sectionId = entry.target.id;
+        document.querySelectorAll(".nav-link").forEach((link) => {
+          link.classList.toggle("active", link.dataset.section === sectionId);
+        });
+      });
+    },
+    { rootMargin: "-35% 0px -45% 0px", threshold: 0 },
+  );
+
+  ["overview", "analysis", "table", "settings"].forEach((id) => {
+    const node = document.getElementById(id);
+    if (node) observer.observe(node);
+  });
+}
+
+function init() {
+  updateThemeButton();
+  renderSettingsForm();
+  renderLogs();
+  bindEvents();
+  if (window.lucide) window.lucide.createIcons();
+  loadDashboard();
+}
+
+init();
