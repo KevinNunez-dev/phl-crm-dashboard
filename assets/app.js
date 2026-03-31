@@ -165,8 +165,6 @@ function makeSparkline(id, trend, color) {
   const canvas = document.getElementById(id);
   if(!canvas) return;
   if(sparkInstances[id]) { sparkInstances[id].destroy(); delete sparkInstances[id]; }
-  canvas.style.height = '40px';
-  canvas.style.width  = '100%';
   sparkInstances[id] = new Chart(canvas, {
     type: 'line',
     data: {
@@ -193,7 +191,6 @@ function buildTrafficChart() {
   const organic  = Array.from({length: 31}, () => Math.round(900  + Math.random() * 400));
   const paid     = Array.from({length: 31}, () => Math.round(400  + Math.random() * 200));
   if(trafficChart) trafficChart.destroy();
-  ctx.style.width = '100%'; ctx.style.height = '240px';
   trafficChart = new Chart(ctx, {
     type: 'line',
     data: { labels, datasets: [
@@ -219,7 +216,6 @@ function buildSourceChart() {
   const ctx = document.getElementById('sourceChart');
   if(!ctx) return;
   if(sourceChart) sourceChart.destroy();
-  ctx.style.width = '100%'; ctx.style.height = '200px';
   sourceChart = new Chart(ctx, {
     type: 'doughnut',
     data: {
@@ -243,7 +239,6 @@ function buildSeoCharts() {
   const ctx = document.getElementById('seoChart');
   if(ctx) {
     if(seoChart) seoChart.destroy();
-    ctx.style.width='100%'; ctx.style.height='240px';
     const labels  = Array.from({length:31},(_,i)=>`Mar ${i+1}`);
     const impr    = Array.from({length:31},()=>Math.round(8000+Math.random()*2000));
     const clicks  = Array.from({length:31},()=>Math.round(900+Math.random()*400));
@@ -267,7 +262,6 @@ function buildSeoCharts() {
   const dCtx = document.getElementById('seoDonut');
   if(dCtx) {
     if(seoDonut) seoDonut.destroy();
-    dCtx.style.width='100%'; dCtx.style.height='200px';
     seoDonut = new Chart(dCtx, {
       type:'doughnut',
       data:{ labels:['Physiotherapy','Occupational','Speech','Rehab','Other'],
@@ -288,7 +282,6 @@ function buildTrafficCharts() {
   const ctx = document.getElementById('trafficBreakdownChart');
   if(ctx) {
     if(trafficBreakdownChart) trafficBreakdownChart.destroy();
-    ctx.style.width='100%'; ctx.style.height='240px';
     const labels  = Array.from({length:31},(_,i)=>`Mar ${i+1}`);
     const organic = Array.from({length:31},()=>Math.round(900+Math.random()*400));
     const paid    = Array.from({length:31},()=>Math.round(400+Math.random()*200));
@@ -315,7 +308,6 @@ function buildTrafficCharts() {
   const dCtx = document.getElementById('deviceChart');
   if(dCtx) {
     if(deviceChart) deviceChart.destroy();
-    dCtx.style.width='100%'; dCtx.style.height='200px';
     deviceChart = new Chart(dCtx, {
       type:'doughnut',
       data:{ labels:['Mobile','Desktop','Tablet'],
@@ -336,7 +328,6 @@ function buildConvCharts() {
   const ctx = document.getElementById('convChart');
   if(ctx) {
     if(convChart) convChart.destroy();
-    ctx.style.width='100%'; ctx.style.height='240px';
     const labels = Array.from({length:31},(_,i)=>`Mar ${i+1}`);
     const forms  = Array.from({length:31},()=>Math.round(18+Math.random()*12));
     const calls  = Array.from({length:31},()=>Math.round(8+Math.random()*6));
@@ -361,7 +352,6 @@ function buildConvCharts() {
   const dCtx = document.getElementById('convDonut');
   if(dCtx) {
     if(convDonut) convDonut.destroy();
-    dCtx.style.width='100%'; dCtx.style.height='200px';
     convDonut = new Chart(dCtx, {
       type:'doughnut',
       data:{ labels:['Organic','Paid','Direct','Social'],

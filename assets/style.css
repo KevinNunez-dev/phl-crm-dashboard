@@ -295,6 +295,13 @@ a, button, [role="button"] {
 .kpi-sub { font-size: var(--text-xs); color: var(--color-text-faint); }
 .sparkline { height: 40px; width: 100%; margin-top: var(--space-1); display: block; }
 
+.chart-wrap canvas,
+.donut-wrap canvas,
+.sparkline {
+  width: 100% !important;
+  height: 100% !important;
+}
+
 /* =========================================================
    CHARTS
    ========================================================= */
