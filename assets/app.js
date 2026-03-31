@@ -109,6 +109,11 @@ document.querySelectorAll('.chart-tab').forEach(tab => {
 function isDark() { return document.documentElement.getAttribute('data-theme') === 'dark'; }
 function gridColor() { return isDark() ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'; }
 function textColor() { return isDark() ? '#797876' : '#7a7974'; }
+const MONDAY_API_URL = 'https://api.monday.com/v2';
+const MONDAY_BOARD_ID = 18404733134; // PHL Consolidated Leads
+// Put your real token here, or use a backend proxy (strongly recommended)
+const MONDAY_API_TOKEN = 'eyJhbGciOiJIUzI1NiJ9.eyJ0aWQiOjY0MDEyNjI2OCwiYWFpIjoxMSwidWlkIjo5OTgxNTY5NCwiaWFkIjoiMjAyNi0wMy0zMVQxNzo0NTozNC4wMDBaIiwicGVyIjoibWU6d3JpdGUiLCJhY3RpZCI6NzQ3NTEwNiwicmduIjoidXNlMSJ9.I120BCWqcR0iZpFRzSz4K8Z8M7SPJ_eI33hVnn23sL4';
+
 function tooltipDefaults() {
   return {
     backgroundColor: isDark() ? '#1a1917' : '#ffffff',
@@ -121,6 +126,138 @@ function tooltipDefaults() {
     bodyFont:  { family: 'Inter', size: 11 }
   };
 }
+
+async function fetchMondayData() {
+  if (!MONDAY_API_TOKEN || MONDAY_API_TOKEN === 'YOUR_MONDAY_API_TOKEN') {
+    console.warn('Monday API token not configured. Using mock data.');
+    return null;
+  }
+
+  const query = `query ($boardId: Int!) {
+    boards(ids: [$boardId]) {
+      items {
+        id
+        name
+        created_at
+        column_values {
+          id
+          title
+          text
+          value
+        }
+      }
+    }
+  }`;
+
+  try {
+    const res = await fetch(MONDAY_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: MONDAY_API_TOKEN
+      },
+      body: JSON.stringify({ query, variables: { boardId: MONDAY_BOARD_ID } })
+    });
+    const json = await res.json();
+    if (json.errors) {
+      console.error('Monday API errors', json.errors);
+      return null;
+    }
+    return json.data?.boards?.[0] || null;
+  } catch (error) {
+    console.error('Monday API fetch failed', error);
+    return null;
+  }
+}
+
+function numberFromValue(value, fallback = 0) {
+  if (!value || typeof value !== 'string') return fallback;
+  const num = Number(value.replace(/[%,\s]/g, ''));
+  return Number.isFinite(num) ? num : fallback;
+}
+
+function findCol(item, keys) {
+  if (!item.column_values) return null;
+  const norm = k => k.trim().toLowerCase();
+  return item.column_values.find(cv => {
+    const id = (cv.id || '').trim().toLowerCase();
+    const title = (cv.title || '').trim().toLowerCase();
+    const text = (cv.text || '').trim().toLowerCase();
+    return keys.some(k => {
+      const nk = norm(k);
+      return id === nk || title === nk || text === nk || title.includes(nk) || text.includes(nk);
+    });
+  });
+}
+
+function getColText(item, keys, fallback = '') {
+  const col = findCol(item, keys);
+  if (!col) return fallback;
+  if (col.text !== undefined && col.text !== null && col.text !== '') return col.text;
+  if (col.value !== undefined && col.value !== null && col.value !== '') {
+    try { const parsed = JSON.parse(col.value); if (parsed && parsed.text) return parsed.text; } catch (e) {}
+    return String(col.value);
+  }
+  return fallback;
+}
+
+function buildMondayMappedData(board) {
+  if (!board?.items || !board.items.length) return;
+
+  const knownItems = board.items.slice(0, 30);
+
+  topPages = knownItems.map(item => {
+    const itemStatus    = getColText(item, ['status', 'item', 'group', 'new caller?']);
+    const newCaller     = getColText(item, ['new caller?', 'new caller', 'caller']);
+    const dateLead      = getColText(item, ['date of lead', 'date', 'created_at', 'created']);
+    const source        = getColText(item, ['source (campaign)', 'source', 'lead source', 'channel']);
+    const clientName    = getColText(item, ['client name', 'name', 'customer']);
+    const landingPage   = getColText(item, ['landing page url', 'landing page', 'url']);
+    const postalCode    = getColText(item, ['postal code', 'zip', 'postcode']);
+    const contactNumber = getColText(item, ['contact number', 'phone', 'contact']);
+
+    return {
+      url: clientName || item.name || 'Unnamed lead',
+      source: source || 'Unknown',
+      status: itemStatus || 'Unspecified',
+      owner: newCaller || '—',
+      created: dateLead || (item.created_at ? new Date(item.created_at).toLocaleDateString() : 'N/A'),
+      phone: contactNumber || '—',
+      email: landingPage || '—',
+      landingPage,
+      postalCode
+    };
+  });
+
+  keywordData = knownItems.slice(0, 7).map((item, idx) => {
+    return {
+      term: getColText(item, ['client name', 'name', 'item']) || item.name || `Lead ${idx + 1}`,
+      pos: getColText(item, ['status', 'stage', 'new caller?']) || 'No status',
+      volume: getColText(item, ['source (campaign)', 'source', 'lead source']) || 'Unknown',
+      change: getColText(item, ['postal code', 'contact number', 'landing page url']) || '–'
+    };
+  });
+
+  // Buttons: convert KPI cards to lead summary
+  const totalLeads = topPages.length;
+  const openLeads = topPages.filter(l => /new|open|pending/i.test(l.status)).length;
+  const closedLeads = topPages.filter(l => /won|closed|converted/i.test(l.status)).length;
+
+  const kpiVisits = document.querySelector('.kpi-card:nth-child(1) .kpi-value');
+  if (kpiVisits) { kpiVisits.dataset.count = totalLeads.toString(); }
+  const kpiImpr = document.querySelector('.kpi-card:nth-child(2) .kpi-value');
+  if (kpiImpr) { kpiImpr.dataset.count = openLeads.toString(); }
+  const kpiConv = document.querySelector('.kpi-card:nth-child(3) .kpi-value');
+  if (kpiConv) { kpiConv.dataset.count = closedLeads.toString(); }
+
+  // Mark the table header to lead view
+  const tableHeadRow = document.querySelector('#pagesTableBody')?.closest('table')?.querySelector('thead tr');
+  if (tableHeadRow) {
+    tableHeadRow.innerHTML = '<th>Lead</th><th>Source</th><th>Status</th><th>New Caller</th><th>Date of Lead</th><th>Landing Page</th><th>Postal Code</th><th>Contact</th>';
+  }
+}
+
+
 function primaryColor() { return isDark() ? '#4f98a3' : '#01696f'; }
 function blueColor()    { return isDark() ? '#5591c7' : '#006494'; }
 function orangeColor()  { return isDark() ? '#fdab43' : '#da7101'; }
@@ -442,19 +579,42 @@ function buildSparklines(page) {
 }
 
 // ── Table & List Builders ─────────────────────────────────
-const topPages = [
+let topPages = [
   { url:'/services/physiotherapy',      clicks:4821, impressions:38400, ctr:'12.6%', pos:'2.1', trend:'up',   delta:'+8%'  },
   { url:'/services/occupational-therapy',clicks:3290, impressions:29100, ctr:'11.3%', pos:'3.4', trend:'up',   delta:'+5%'  },
-  { url:'/about-us',                    clicks:2741, impressions:22800, ctr:'12.0%', pos:'4.0', trend:'flat', delta:'0%'   },
-  { url:'/blog/back-pain-tips',         clicks:2156, impressions:41200, ctr:'5.2%',  pos:'6.2', trend:'up',   delta:'+14%' },
-  { url:'/contact',                     clicks:1894, impressions:18300, ctr:'10.3%', pos:'2.9', trend:'down', delta:'-3%'  },
-  { url:'/locations/miami',             clicks:1743, impressions:15600, ctr:'11.2%', pos:'3.1', trend:'up',   delta:'+21%' },
-  { url:'/services/speech-therapy',     clicks:1420, impressions:19700, ctr:'7.2%',  pos:'5.8', trend:'down', delta:'-7%'  },
+];
+
+let keywordData = [
+  { term:'physiotherapy miami',          pos:1,  volume:'2,400', change:'+2' },
+  { term:'occupational therapy near me', pos:3,  volume:'1,900', change:'+5' },
+  { term:'speech therapy clinic miami',  pos:4,  volume:'880',   change:'+1' },
+  { term:'back pain physiotherapist',    pos:6,  volume:'3,200', change:'+8' },
+  { term:'pediatric therapy miami',      pos:7,  volume:'720',   change:'0'  },
+  { term:'sports injury rehab',          pos:9,  volume:'1,300', change:'-2' },
+  { term:'telehealth therapy florida',   pos:11, volume:'590',   change:'+3' },
 ];
 
 function buildPagesTable() {
   const tbody = document.getElementById('pagesTableBody');
   if(!tbody) return;
+
+  const isLeadReport = topPages.length && topPages[0].source !== undefined;
+  if(isLeadReport) {
+    tbody.innerHTML = topPages.map(p => `
+      <tr>
+        <td><span class="page-url">${p.url}</span></td>
+        <td>${p.source}</td>
+        <td>${p.status}</td>
+        <td>${p.owner}</td>
+        <td>${p.created}</td>
+        <td>${p.landingPage || '—'}</td>
+        <td>${p.postalCode || '—'}</td>
+        <td>${p.phone}</td>
+      </tr>
+    `).join('');
+    return;
+  }
+
   tbody.innerHTML = topPages.map(p => `
     <tr><td><span class="page-url">${p.url}</span></td>
     <td class="num">${p.clicks.toLocaleString()}</td>
@@ -467,16 +627,7 @@ function buildPagesTable() {
 function buildKeywordList() {
   const list = document.getElementById('keywordList');
   if(!list) return;
-  const kws = [
-    { term:'physiotherapy miami',          pos:1,  volume:'2,400', change:'+2' },
-    { term:'occupational therapy near me', pos:3,  volume:'1,900', change:'+5' },
-    { term:'speech therapy clinic miami',  pos:4,  volume:'880',   change:'+1' },
-    { term:'back pain physiotherapist',    pos:6,  volume:'3,200', change:'+8' },
-    { term:'pediatric therapy miami',      pos:7,  volume:'720',   change:'0'  },
-    { term:'sports injury rehab',          pos:9,  volume:'1,300', change:'-2' },
-    { term:'telehealth therapy florida',   pos:11, volume:'590',   change:'+3' },
-  ];
-  list.innerHTML = kws.map(k => {
+  list.innerHTML = keywordData.map(k => {
     const n = parseInt(k.change);
     const cls = n>0?'trend-up':n<0?'trend-down':'trend-flat';
     const arrow = n>0?'↑':n<0?'↓':'—';
@@ -612,6 +763,15 @@ function updateChartTheme() {
 lucide.createIcons();
 
 // ── Init ──────────────────────────────────────────────────
-buildPagesTable();
-buildKeywordList();
-initPageCharts('overview');
+async function loadMondayDashboard() {
+  const board = await fetchMondayData();
+  console.log('Monday board data', board);
+  if (board) {
+    buildMondayMappedData(board);
+  }
+  buildPagesTable();
+  buildKeywordList();
+  initPageCharts('overview');
+}
+
+loadMondayDashboard();
